@@ -17,8 +17,8 @@ gpui.workspace = true
 workspace.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-city_model = { git = "https://github.com/HubDev-AI/eof", rev = "9bff1e0685a82219f0f86f12a0ea0387c9a5ca16" }
-city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "9bff1e0685a82219f0f86f12a0ea0387c9a5ca16" }
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "d4bd3b0f701eafaa165901269a1995072588e74c" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "d4bd3b0f701eafaa165901269a1995072588e74c" }
 clock.workspace = true
 futures.workspace = true
 gpui_apple = { workspace = true, features = ["font-kit"] }
