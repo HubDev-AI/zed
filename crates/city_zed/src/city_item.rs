@@ -31,7 +31,7 @@ fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspa
 }
 
 /// Where the city's files come from. Swapping the Zed feed for eof's disk watcher is this one
-/// call, for example `Some(city_shell::disk_source(root))`.
+/// call, `Some(host_standalone::disk_source(root))`, plus a `host_standalone` dependency.
 fn city_source(project: &Entity<Project>, cx: &mut App) -> Option<Source> {
     zed_feed::source(project, cx)
 }
