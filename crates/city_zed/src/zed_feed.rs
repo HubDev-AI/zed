@@ -8,9 +8,9 @@ use std::{
 
 use city_model::PathsChanged;
 use city_shell::{HostChange, Listing, Source};
-use futures::channel::mpsc::{UnboundedSender, unbounded};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription};
-use language::{Buffer, BufferEvent};
+use language::{Buffer, BufferEditSource, BufferEvent};
 use project::{
     MTime, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId, buffer_store::BufferStoreEvent,
 };
@@ -19,7 +19,12 @@ use util::ResultExt as _;
 /// The first visible folder of a local project as a city source, or `None` when there is none.
 /// The snapshot may still be filling at startup; the files it lacks arrive as entry updates,
 /// which the feed takes from the same point on.
-pub(crate) fn source(project: &Entity<Project>, cx: &mut App) -> Option<Source> {
+pub(crate) fn source(
+    project: &Entity<Project>,
+    sender: UnboundedSender<HostChange>,
+    changes: UnboundedReceiver<HostChange>,
+    cx: &mut App,
+) -> Option<Source> {
     if !project.read(cx).is_local() {
         return None;
     }
@@ -30,7 +35,6 @@ pub(crate) fn source(project: &Entity<Project>, cx: &mut App) -> Option<Source> 
         .files(false, 0)
         .map(|entry| entry.path.as_unix_str().to_string())
         .collect();
-    let (sender, changes) = unbounded();
     let shown = listing.iter().cloned().collect();
     let feed = cx.new(|cx| ZedFeed::new(project, snapshot.id(), shown, sender, cx));
     Some(Source {
@@ -148,7 +152,13 @@ impl ZedFeed {
         let events = cx.subscribe(
             buffer,
             |this, buffer, event: &BufferEvent, cx| match event {
-                BufferEvent::Edited { .. } | BufferEvent::DirtyChanged | BufferEvent::Reloaded => {
+                BufferEvent::Edited { source } => {
+                    if *source == BufferEditSource::Agent {
+                        this.agent_edited(&buffer, cx);
+                    }
+                    this.buffer_changed(&buffer, cx)
+                }
+                BufferEvent::DirtyChanged | BufferEvent::Reloaded => {
                     this.buffer_changed(&buffer, cx)
                 }
                 BufferEvent::Saved => this.buffer_saved(&buffer, cx),
@@ -164,6 +174,13 @@ impl ZedFeed {
             .file()
             .filter(|file| file.worktree_id(cx) == self.worktree_id)
             .map(|file| file.path().as_unix_str().to_string())
+    }
+
+    /// Tells the city an agent wrote into the buffer, before the text it wrote arrives.
+    fn agent_edited(&self, buffer: &Entity<Buffer>, cx: &App) {
+        if let Some(path) = self.path_in_worktree(buffer.read(cx), cx) {
+            self.send(crate::zed_agents::edited(path));
+        }
     }
 
     /// Hands the buffer's text to the city while it differs from the disk, and takes it back
@@ -402,7 +419,12 @@ mod tests {
             mut changes,
             keep_alive,
             ..
-        } = cx.update(|cx| source(&project, cx)).unwrap();
+        } = cx
+            .update(|cx| {
+                let (sender, changes) = futures::channel::mpsc::unbounded();
+                source(&project, sender, changes, cx)
+            })
+            .unwrap();
         let Listing::Paths(mut listed) = listing else {
             panic!("the Zed feed lists its own files");
         };
@@ -438,7 +460,7 @@ mod tests {
             .filter(|change| match change {
                 HostChange::Text { path, text: None } => path == "src/main.rs",
                 HostChange::Paths(change) => change.modified.iter().any(|p| p == "src/main.rs"),
-                HostChange::Text { .. } => false,
+                HostChange::Text { .. } | HostChange::Agent { .. } => false,
             })
             .count();
         assert_eq!(rereads, 1, "{sent:?}");

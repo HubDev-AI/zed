@@ -1,6 +1,8 @@
 #[cfg(target_os = "macos")]
 mod city_item;
 #[cfg(target_os = "macos")]
+mod zed_agents;
+#[cfg(target_os = "macos")]
 mod zed_feed;
 #[cfg(target_os = "macos")]
 mod zed_settings;

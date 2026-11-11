@@ -17,9 +17,13 @@ gpui.workspace = true
 workspace.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-city_model = { git = "https://github.com/HubDev-AI/eof", rev = "3e18777bb65dfccba9fedd78e367f249a8c1a589" }
-city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "3e18777bb65dfccba9fedd78e367f249a8c1a589" }
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "3e18777bb65dfccba9fedd78e367f249a8c1a589" }
+acp_thread.workspace = true
+agent-client-protocol.workspace = true
+agent_ui.workspace = true
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "46a93986b9ea2e634bfc93738f6002fe993c97a4" }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "46a93986b9ea2e634bfc93738f6002fe993c97a4" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "46a93986b9ea2e634bfc93738f6002fe993c97a4", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "46a93986b9ea2e634bfc93738f6002fe993c97a4" }
 clock.workspace = true
 fs.workspace = true
 futures.workspace = true
@@ -34,9 +38,11 @@ settings_json = { workspace = true, features = ["editing"] }
 util.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "3e18777bb65dfccba9fedd78e367f249a8c1a589", features = ["test-support"] }
+acp_thread = { workspace = true, features = ["test-support"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "46a93986b9ea2e634bfc93738f6002fe993c97a4", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
+remote_connection = { workspace = true, features = ["test-support"] }
 settings = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 workspace = { workspace = true, features = ["test-support"] }

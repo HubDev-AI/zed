@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Instant};
 
+use agent_ui::AgentPanel;
 use city_shell::{CityShell, Source};
+use futures::channel::mpsc::unbounded;
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Task, Window, div,
     prelude::*,
@@ -9,7 +11,7 @@ use project::Project;
 use util::ResultExt as _;
 use workspace::{Item, Workspace};
 
-use crate::{Open, zed_feed, zed_settings};
+use crate::{Open, zed_agents, zed_feed, zed_settings};
 
 pub(crate) fn init(cx: &mut App) {
     city_shell::init(settings_store(cx), cx);
@@ -26,15 +28,31 @@ fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspa
         return;
     }
     let project = workspace.project().clone();
-    let city = cx.new(|cx| CityItem::new(&project, window, cx));
+    let agents = (cx.entity(), workspace.panel::<AgentPanel>(cx));
+    let city = cx.new(|cx| CityItem::new(&project, Some(agents), window, cx));
     workspace.add_item_to_active_pane(Box::new(city), None, true, window, cx);
 }
 
-/// Where the city's files come from. Swapping the Zed feed for eof's disk watcher is this one
-/// call, `Some(host_standalone::disk_source(root))`, plus a `host_standalone` dependency.
-fn city_source(project: &Entity<Project>, cx: &mut App) -> Option<Source> {
-    zed_feed::source(project, cx)
+/// Where the city's files and agent signals come from: adapters that send into one stream, so an
+/// agent edit reaches the city before its text. Swapping the Zed feed for eof's disk watcher
+/// replaces `zed_feed::source` with `host_standalone::disk_source(root)` (plus a `host_standalone`
+/// dependency), whose stream the agent adapter would then need forwarding into.
+fn city_source(
+    project: &Entity<Project>,
+    agents: Option<AgentHost>,
+    cx: &mut App,
+) -> Option<Source> {
+    let (sender, changes) = unbounded();
+    let mut source = zed_feed::source(project, sender.clone(), changes, cx)?;
+    if let Some((workspace, panel)) = agents {
+        let agents = zed_agents::follow(&workspace, panel, source.root.clone(), sender, cx);
+        source.keep_alive = Box::new((source.keep_alive, agents));
+    }
+    Some(source)
 }
+
+/// The workspace whose agent panel the city follows, and the panel when it has one yet.
+type AgentHost = (Entity<Workspace>, Option<Entity<AgentPanel>>);
 
 /// Where the city keeps its view settings: under a `city` key in Zed's settings file. Another
 /// `city_settings::SettingsStore` takes its place here.
@@ -57,6 +75,7 @@ pub struct CityItem {
 impl CityItem {
     pub(crate) fn new(
         project: &Entity<Project>,
+        agents: Option<AgentHost>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -65,7 +84,7 @@ impl CityItem {
             state: State::Loading,
             _open: Task::ready(()),
         };
-        let Some(source) = city_source(project, cx) else {
+        let Some(source) = city_source(project, agents, cx) else {
             item.state = State::Failed("Open a local folder to see it as a city.".into());
             return item;
         };
@@ -222,7 +241,7 @@ mod tests {
         put(&root, "src/main.rs", "mod parse;\nfn main() {}\n");
         put(&root, "src/parse.rs", "pub fn parse() {}\n");
         let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
-        let (item, cx) = cx.add_window_view(|window, cx| CityItem::new(&project, window, cx));
+        let (item, cx) = cx.add_window_view(|window, cx| CityItem::new(&project, None, window, cx));
 
         wait_for(3, &item, cx);
         put(&root, "src/print.rs", "pub fn print() {}\n");
@@ -245,7 +264,7 @@ mod tests {
         let root = dir.path().canonicalize().unwrap();
         let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
         let (item, cx) = cx.add_window_view(|window, cx| {
-            let item = CityItem::new(&project, window, cx);
+            let item = CityItem::new(&project, None, window, cx);
             item.focus.focus(window, cx);
             item
         });
@@ -294,7 +313,7 @@ mod tests {
             for attempt in ["first open", "reopen"] {
                 let started = Instant::now();
                 let (item, cx) =
-                    cx.add_window_view(|window, cx| CityItem::new(&project, window, cx));
+                    cx.add_window_view(|window, cx| CityItem::new(&project, None, window, cx));
                 let files = loop {
                     cx.run_until_parked();
                     let files = item.read_with(cx, |item, cx| {
