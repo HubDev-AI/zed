@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # Registers the `city_zed` crate in this Zed checkout. Every edit is skipped when it is already
-# there, so the script can run again on a new upstream tag.
+# there, so the script can run again on a new upstream tag. Removing the city takes both the
+# `city_zed::init` line and the `CityView` keymap block: without the init line the city's actions
+# leave the binary, and Zed rejects a bundled keymap that names unknown actions.
 
 set -euo pipefail
 
