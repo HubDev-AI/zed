@@ -9,10 +9,10 @@ use project::Project;
 use util::ResultExt as _;
 use workspace::{Item, Workspace};
 
-use crate::{Open, zed_feed};
+use crate::{Open, zed_feed, zed_settings};
 
 pub(crate) fn init(cx: &mut App) {
-    city_shell::init(cx);
+    city_shell::init(settings_store(cx), cx);
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &Open, window, cx| open(workspace, window, cx));
     })
@@ -34,6 +34,12 @@ fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspa
 /// call, `Some(host_standalone::disk_source(root))`, plus a `host_standalone` dependency.
 fn city_source(project: &Entity<Project>, cx: &mut App) -> Option<Source> {
     zed_feed::source(project, cx)
+}
+
+/// Where the city keeps its view settings: under a `city` key in Zed's settings file. Another
+/// `city_settings::SettingsStore` takes its place here.
+fn settings_store(cx: &mut App) -> city_settings::Settings {
+    zed_settings::from_settings_file(<dyn fs::Fs>::global(cx), paths::settings_file().clone(), cx)
 }
 
 enum State {
@@ -170,6 +176,13 @@ mod tests {
     const WATCHED_POLL: Duration = Duration::from_millis(50);
     const OPEN_DEADLINE: Duration = Duration::from_secs(120);
 
+    fn test_settings() -> city_settings::Settings {
+        city_settings::Settings {
+            store: city_settings::MemoryStore::new(None),
+            updates: futures::channel::mpsc::unbounded().1,
+        }
+    }
+
     fn put(root: &Path, path: &str, text: &str) {
         let path = root.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -201,7 +214,7 @@ mod tests {
         cx.update(|cx| {
             let settings = SettingsStore::test(cx);
             cx.set_global(settings);
-            city_shell::init(cx);
+            city_shell::init(test_settings(), cx);
         });
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
@@ -226,7 +239,7 @@ mod tests {
         cx.update(|cx| {
             let settings = SettingsStore::test(cx);
             cx.set_global(settings);
-            city_shell::init(cx);
+            city_shell::init(test_settings(), cx);
         });
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
@@ -259,7 +272,7 @@ mod tests {
         cx.update(|cx| {
             let settings = SettingsStore::test(cx);
             cx.set_global(settings);
-            city_shell::init(cx);
+            city_shell::init(test_settings(), cx);
         });
         let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")

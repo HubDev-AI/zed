@@ -17,17 +17,24 @@ gpui.workspace = true
 workspace.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-city_model = { git = "https://github.com/HubDev-AI/eof", rev = "d4bd3b0f701eafaa165901269a1995072588e74c" }
-city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "d4bd3b0f701eafaa165901269a1995072588e74c" }
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "c3deaf86248543a60cb7113d1da94957c2b7c673" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "c3deaf86248543a60cb7113d1da94957c2b7c673" }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "c3deaf86248543a60cb7113d1da94957c2b7c673" }
 clock.workspace = true
+fs.workspace = true
 futures.workspace = true
 gpui_apple = { workspace = true, features = ["font-kit"] }
 language.workspace = true
 log.workspace = true
+paths.workspace = true
 project.workspace = true
+serde_json.workspace = true
+settings.workspace = true
+settings_json = { workspace = true, features = ["editing"] }
 util.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "c3deaf86248543a60cb7113d1da94957c2b7c673", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
 settings = { workspace = true, features = ["test-support"] }
