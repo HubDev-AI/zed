@@ -76,12 +76,19 @@ impl CityItem {
                             "city: {root:?} ready {} ms after open",
                             started.elapsed().as_millis()
                         );
-                        window.on_next_frame(move |_, _| {
-                            log::info!(
-                                "city: first frame {} ms after open",
-                                started.elapsed().as_millis()
-                            );
+                        // Next-frame callbacks run before that frame draws, so the second one
+                        // runs once the frame that first draws the city is done.
+                        window.on_next_frame(move |window, _| {
+                            window.on_next_frame(move |_, _| {
+                                log::info!(
+                                    "city: first frame drawn {} ms after open",
+                                    started.elapsed().as_millis()
+                                );
+                            });
                         });
+                        if this.focus.is_focused(window) {
+                            shell.focus_handle(cx).focus(window, cx);
+                        }
                         this.state = State::Ready(shell);
                     }
                     Err(error) => {
@@ -153,7 +160,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use gpui::{Entity, TestAppContext, VisualTestContext};
+    use gpui::{Entity, Focusable as _, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
     use settings::SettingsStore;
 
@@ -209,6 +216,38 @@ mod tests {
         wait_for(4, &item, cx);
         fs::remove_file(root.join("src/parse.rs")).unwrap();
         wait_for(3, &item, cx);
+    }
+
+    // A folder can start empty and be emptied again; the city keeps following it, and keeps the
+    // keyboard focus the tab had while it was loading, so the city's keys work without a click.
+    #[gpui::test]
+    async fn the_city_tab_opens_on_an_empty_folder_and_follows_it(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+            city_shell::init(cx);
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let (item, cx) = cx.add_window_view(|window, cx| {
+            let item = CityItem::new(&project, window, cx);
+            item.focus.focus(window, cx);
+            item
+        });
+
+        wait_for(0, &item, cx);
+        let shell_focused = cx.update(|window, cx| {
+            let item = item.read(cx);
+            item.shell()
+                .is_some_and(|shell| shell.focus_handle(cx).is_focused(window))
+        });
+        assert!(shell_focused);
+        put(&root, "notes.md", "# Notes\n");
+        wait_for(1, &item, cx);
+        fs::remove_file(root.join("notes.md")).unwrap();
+        wait_for(0, &item, cx);
     }
 
     // Off-screen open-to-ready time of the tab, on this checkout and on a small folder, for a first
