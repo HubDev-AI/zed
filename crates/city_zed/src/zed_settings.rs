@@ -35,10 +35,8 @@ pub(crate) fn from_settings_file(fs: Arc<dyn Fs>, path: PathBuf, cx: &mut App) -
             let Ok(Some(saved)) = parse(&text) else {
                 continue;
             };
-            let known = followed.last.replace(Some(saved));
-            if known.map(|known| known.tuning) != Some(saved.tuning)
-                && sender.unbounded_send(saved.tuning).is_err()
-            {
+            let known = followed.last.replace(Some(saved.clone()));
+            if known.as_ref() != Some(&saved) && sender.unbounded_send(saved).is_err() {
                 break;
             }
         }
@@ -61,7 +59,7 @@ impl SettingsStore for ZedSettingsStore {
             .and_then(|text| parse(&text))
             .map_err(|e| format!("{}: {e}", self.path.display()))?;
         if saved.is_some() {
-            self.last.replace(saved);
+            self.last.replace(saved.clone());
         }
         Ok(saved)
     }
@@ -71,7 +69,7 @@ impl SettingsStore for ZedSettingsStore {
         let path = std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
         let text = read_text(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let text = with_city(text, saved).map_err(|e| format!("{}: {e}", path.display()))?;
-        self.last.replace(Some(*saved));
+        self.last.replace(Some(saved.clone()));
         write_text(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(format!("\"{KEY}\" in {}", path.display()))
     }
@@ -266,6 +264,6 @@ mod tests {
 
         let edited = fs::read_to_string(&path).unwrap();
         put_city(&path, &edited, &tuned(70.));
-        assert_eq!(next_update(&mut city.updates, cx), tuned(70.).tuning);
+        assert_eq!(next_update(&mut city.updates, cx), tuned(70.));
     }
 }

@@ -1,31 +1,29 @@
-//! Agents at work, as Zed's agent panel runs them: every live thread's turns and tool calls,
-//! turned into city_host's agent signals. Agent edits of buffers are announced by the file feed,
-//! which sees them first and must send them before their text.
+//! Agents at work, as Zed's agent panel runs them: every live thread's turns, names and tool
+//! calls, and its subagents', turned into city_host's agent signals. Who wrote a file comes with
+//! the file's own change from the file feed, which sees the buffer edit.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use acp_thread::{AcpThread, AcpThreadEvent, AgentThreadEntry, ThreadStatus, ToolCallStatus};
 use agent_client_protocol::schema::v2 as acp;
 use agent_ui::{AgentPanel, ConversationView};
 use city_host::{
-    AgentSignal, Origin, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation, ToolStatus,
+    AgentSignal, StopReason, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation, ToolStatus,
+    tuning::HEARD_WITHIN,
 };
 use city_shell::HostChange;
 use futures::channel::mpsc::UnboundedSender;
-use gpui::{AppContext as _, Context, Entity, EntityId, Subscription};
+use gpui::{AppContext as _, Context, Entity, EntityId, Subscription, Task};
 use util::ResultExt as _;
 use workspace::Workspace;
 
-/// The agent signal for an edit an agent made to the file at `path`.
-pub(crate) fn edited(path: String) -> HostChange {
-    HostChange::Agent {
-        signal: AgentSignal::Edited { path },
-        origin: Origin::Host,
-    }
-}
+/// How often a live thread's state is sent again, well inside the time the city waits before it
+/// stops trusting a live state it has not heard.
+const HEARTBEAT: Duration = Duration::from_secs(HEARD_WITHIN.as_secs() / 2);
 
 /// Follows the agent threads of `workspace`'s agent panel, now and as it gains one, sending
 /// their signals with paths relative to `root`.
@@ -37,7 +35,7 @@ pub(crate) fn follow(
     cx: &mut gpui::App,
 ) -> Entity<ZedAgents> {
     cx.new(|cx| {
-        let mut agents = ZedAgents::new(root, sender);
+        let mut agents = ZedAgents::new(root, sender, cx);
         agents._workspace = Some(cx.subscribe(
             workspace,
             |this: &mut ZedAgents, _, event: &workspace::Event, cx| {
@@ -62,18 +60,34 @@ pub(crate) struct ZedAgents {
     views: HashMap<EntityId, Subscription>,
     threads: HashMap<EntityId, Followed>,
     _workspace: Option<Subscription>,
+    _heartbeat: Task<()>,
 }
 
 /// One thread, and what the city has last been told of it.
 struct Followed {
     id: ThreadId,
+    parent: Option<ThreadId>,
     state: Option<ThreadState>,
+    /// Every call sent, as last sent, across all turns: a call the agent replays unchanged in a
+    /// later turn is not news.
     calls: HashMap<String, ToolCall>,
     _subscriptions: [Subscription; 2],
 }
 
 impl ZedAgents {
-    fn new(root: PathBuf, sender: UnboundedSender<HostChange>) -> Self {
+    pub(crate) fn new(
+        root: PathBuf,
+        sender: UnboundedSender<HostChange>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let heartbeat = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(HEARTBEAT).await;
+                if this.update(cx, |this, _| this.heartbeat()).is_err() {
+                    break;
+                }
+            }
+        });
         Self {
             root,
             sender,
@@ -81,6 +95,7 @@ impl ZedAgents {
             views: HashMap::default(),
             threads: HashMap::default(),
             _workspace: None,
+            _heartbeat: heartbeat,
         }
     }
 
@@ -107,9 +122,18 @@ impl ZedAgents {
         }
     }
 
-    /// Follows `thread` from now on. A thread already in a turn is reported as working, with the
-    /// tool calls still open.
+    /// Follows `thread` and its subagents from now on.
     pub(crate) fn track(&mut self, thread: Entity<AcpThread>, cx: &mut Context<Self>) {
+        self.track_with_parent(thread, None, cx);
+    }
+
+    /// A thread already in a turn is reported as working, with the tool calls still open.
+    fn track_with_parent(
+        &mut self,
+        thread: Entity<AcpThread>,
+        parent: Option<ThreadId>,
+        cx: &mut Context<Self>,
+    ) {
         let key = thread.entity_id();
         if self.threads.contains_key(&key) {
             return;
@@ -122,18 +146,26 @@ impl ZedAgents {
         self.threads.insert(
             key,
             Followed {
-                id,
+                id: id.clone(),
+                parent,
                 state: None,
                 calls: HashMap::default(),
                 _subscriptions: [events, released],
             },
         );
-        if thread.read(cx).status() == ThreadStatus::Generating {
-            self.set_state(key, ThreadState::Working);
-            let open: Vec<usize> = (0..thread.read(cx).entries().len()).collect();
-            for index in open {
-                self.entry_changed(key, &thread, index, true, cx);
+        match thread.read(cx).status() {
+            ThreadStatus::Generating => {
+                self.set_state(key, &thread, ThreadState::Working, cx);
+                for index in 0..thread.read(cx).entries().len() {
+                    self.entry_changed(key, &thread, index, true, cx);
+                }
             }
+            ThreadStatus::Unconfirmed => self.set_state(key, &thread, ThreadState::Unknown, cx),
+            ThreadStatus::Idle => {}
+        }
+        let subagents: Vec<Entity<AcpThread>> = thread.read(cx).subagents().cloned().collect();
+        for subagent in subagents {
+            self.track_with_parent(subagent, Some(id.clone()), cx);
         }
     }
 
@@ -145,11 +177,14 @@ impl ZedAgents {
         cx: &mut Context<Self>,
     ) {
         match event {
-            AcpThreadEvent::StatusChanged => match thread.read(cx).status() {
-                ThreadStatus::Generating => self.set_state(key, ThreadState::Working),
-                ThreadStatus::Idle => self.set_state(key, ThreadState::Idle),
-                ThreadStatus::Unconfirmed => {}
-            },
+            AcpThreadEvent::StatusChanged => {
+                let state = match thread.read(cx).status() {
+                    ThreadStatus::Generating => ThreadState::Working,
+                    ThreadStatus::Idle => ThreadState::Idle,
+                    ThreadStatus::Unconfirmed => ThreadState::Unknown,
+                };
+                self.set_state(key, thread, state, cx);
+            }
             AcpThreadEvent::NewEntry => {
                 if let Some(index) = thread.read(cx).entries().len().checked_sub(1) {
                     self.entry_changed(key, thread, index, false, cx);
@@ -159,23 +194,35 @@ impl ZedAgents {
                 self.entry_changed(key, thread, *index, false, cx)
             }
             AcpThreadEvent::ToolAuthorizationRequested(_) => {
-                self.set_state(key, ThreadState::WaitingForPermission);
+                self.set_state(key, thread, ThreadState::WaitingForPermission, cx);
                 self.calls_changed(key, thread, cx);
             }
             AcpThreadEvent::ToolAuthorizationReceived(_) => {
-                self.set_state(key, ThreadState::Working);
+                self.set_state(key, thread, ThreadState::Working, cx);
                 self.calls_changed(key, thread, cx);
             }
             AcpThreadEvent::Stopped { stop_reason, .. } => {
                 self.calls_changed(key, thread, cx);
-                let state = match stop_reason {
-                    Some(acp::StopReason::EndTurn) | None => ThreadState::Idle,
-                    Some(_) => ThreadState::Stopped,
-                };
-                self.set_state(key, state);
+                self.set_state(key, thread, ended(stop_reason.as_ref()), cx);
             }
-            AcpThreadEvent::Error | AcpThreadEvent::ConnectionLost | AcpThreadEvent::Refusal => {
-                self.set_state(key, ThreadState::Error)
+            AcpThreadEvent::Refusal => self.set_state(
+                key,
+                thread,
+                ThreadState::Stopped {
+                    reason: StopReason::Refusal,
+                },
+                cx,
+            ),
+            AcpThreadEvent::Error | AcpThreadEvent::ConnectionLost => {
+                self.set_state(key, thread, ThreadState::Error, cx)
+            }
+            AcpThreadEvent::TitleUpdated => self.send_name(key, thread, cx),
+            AcpThreadEvent::SubagentSpawned(session) => {
+                let child = thread.read(cx).subagent(session).cloned();
+                let parent = self.threads.get(&key).map(|followed| followed.id.clone());
+                if let Some(child) = child {
+                    self.track_with_parent(child, parent, cx);
+                }
             }
             _ => {}
         }
@@ -199,18 +246,18 @@ impl ZedAgents {
         let Some(AgentThreadEntry::ToolCall(call)) = thread.read(cx).entries().get(index) else {
             return;
         };
+        let label = call.label.read(cx).source().trim().to_string();
         let call = ToolCall {
             id: call.id.to_string(),
             kind: tool_kind(call.kind()),
             status: tool_status(call.status()),
+            title: (!label.is_empty()).then_some(label),
             locations: call
                 .locations
                 .iter()
-                .filter_map(|location| {
-                    Some(ToolLocation {
-                        path: relative(&self.root, &location.path)?,
-                        line: location.line,
-                    })
+                .map(|location| ToolLocation {
+                    path: city_path(&self.root, &location.path),
+                    line: location.line,
                 })
                 .collect(),
         };
@@ -220,15 +267,15 @@ impl ZedAgents {
         let Some(followed) = self.threads.get(&key) else {
             return;
         };
-        let in_turn = followed.state.is_some_and(ThreadState::in_turn);
+        let live = followed.state.is_some_and(ThreadState::live);
         // Calls seen again after their turn ended, such as the replay when a turn stops, are old
         // news; only a thread that is generating opens a turn for a call.
         let generating = thread.read(cx).status() == ThreadStatus::Generating;
-        if followed.calls.get(&call.id) == Some(&call) || (!in_turn && !generating) {
+        if followed.calls.get(&call.id) == Some(&call) || (!live && !generating) {
             return;
         }
-        if !in_turn {
-            self.set_state(key, ThreadState::Working);
+        if !live {
+            self.set_state(key, thread, ThreadState::Working, cx);
         }
         let Some(followed) = self.threads.get_mut(&key) else {
             return;
@@ -241,17 +288,26 @@ impl ZedAgents {
         self.send(signal);
     }
 
-    fn set_state(&mut self, key: EntityId, state: ThreadState) {
+    /// Sends the thread's state when it changes, with its name just before it.
+    fn set_state(
+        &mut self,
+        key: EntityId,
+        thread: &Entity<AcpThread>,
+        state: ThreadState,
+        cx: &gpui::App,
+    ) {
+        if self
+            .threads
+            .get(&key)
+            .is_none_or(|followed| followed.state == Some(state))
+        {
+            return;
+        }
+        self.send_name(key, thread, cx);
         let Some(followed) = self.threads.get_mut(&key) else {
             return;
         };
-        if followed.state == Some(state) {
-            return;
-        }
         followed.state = Some(state);
-        if !state.in_turn() {
-            followed.calls.clear();
-        }
         let signal = AgentSignal::Thread {
             thread: followed.id.clone(),
             state,
@@ -259,24 +315,43 @@ impl ZedAgents {
         self.send(signal);
     }
 
-    /// A thread that goes away mid-turn ends its turn.
-    fn released(&mut self, key: EntityId) {
-        if self
-            .threads
-            .get(&key)
-            .is_some_and(|followed| followed.state.is_some_and(ThreadState::in_turn))
-        {
-            self.set_state(key, ThreadState::Stopped);
+    fn send_name(&self, key: EntityId, thread: &Entity<AcpThread>, cx: &gpui::App) {
+        let Some(followed) = self.threads.get(&key) else {
+            return;
+        };
+        let thread = thread.read(cx);
+        self.send(AgentSignal::Named {
+            thread: followed.id.clone(),
+            title: thread.title().map(|title| title.to_string()),
+            agent: Some(thread.connection().agent_id().to_string()),
+            parent: followed.parent.clone(),
+        });
+    }
+
+    /// Confirms each live thread's state again, so the city keeps trusting it.
+    fn heartbeat(&self) {
+        for followed in self.threads.values() {
+            if let Some(state) = followed.state.filter(|state| state.live()) {
+                self.send(AgentSignal::Thread {
+                    thread: followed.id.clone(),
+                    state,
+                });
+            }
         }
-        self.threads.remove(&key);
+    }
+
+    fn released(&mut self, key: EntityId) {
+        if let Some(followed) = self.threads.remove(&key) {
+            self.send(AgentSignal::Thread {
+                thread: followed.id,
+                state: ThreadState::Gone,
+            });
+        }
     }
 
     fn send(&self, signal: AgentSignal) {
         self.sender
-            .unbounded_send(HostChange::Agent {
-                signal,
-                origin: Origin::Host,
-            })
+            .unbounded_send(HostChange::Agent { signal })
             .log_err();
     }
 }
@@ -286,14 +361,31 @@ fn root_thread(view: &Entity<ConversationView>, cx: &gpui::App) -> Option<Entity
     Some(thread_view.read(cx).thread.clone())
 }
 
-/// `path` relative to `root`, `/`-separated, or `None` when it lies outside.
-fn relative(root: &Path, path: &Path) -> Option<String> {
-    let inside = path.strip_prefix(root).ok()?;
-    let parts: Vec<String> = inside
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    (!parts.is_empty()).then(|| parts.join("/"))
+/// The state a turn ends in for the reason the agent gave.
+fn ended(reason: Option<&acp::StopReason>) -> ThreadState {
+    let reason = match reason {
+        None | Some(acp::StopReason::EndTurn) => return ThreadState::Idle,
+        Some(acp::StopReason::Error(_)) => return ThreadState::Error,
+        Some(acp::StopReason::Cancelled) => StopReason::Cancelled,
+        Some(acp::StopReason::MaxTokens) => StopReason::MaxTokens,
+        Some(acp::StopReason::MaxTurnRequests) => StopReason::MaxTurnRequests,
+        Some(acp::StopReason::Refusal) => StopReason::Refusal,
+        Some(_) => StopReason::Other,
+    };
+    ThreadState::Stopped { reason }
+}
+
+/// `path` as the city names it: relative to `root` and `/`-separated inside it, absolute
+/// outside.
+fn city_path(root: &Path, path: &Path) -> String {
+    match path.strip_prefix(root) {
+        Ok(inside) if inside.components().next().is_some() => inside
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/"),
+        _ => path.to_string_lossy().into_owned(),
+    }
 }
 
 fn tool_kind(kind: &acp::ToolKind) -> ToolKind {
@@ -327,40 +419,78 @@ mod tests {
     use acp_thread::{AcpThread, AgentConnection as _, StubAgentConnection};
     use agent_client_protocol::schema::v1 as acp_v1;
     use city_host::{
-        AgentSignal, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation, ToolStatus,
+        AgentSignal, StopReason, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation,
+        ToolStatus,
     };
-    use city_shell::{HostChange, Source};
-    use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+    use city_shell::HostChange;
+    use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
     use gpui::{AppContext as _, Entity, TestAppContext};
-    use language::BufferEditSource;
     use project::{Project, RealFs};
     use settings::SettingsStore;
     use util::path_list::PathList;
 
-    use super::ZedAgents;
-    use crate::zed_feed;
+    use super::{HEARTBEAT, ZedAgents};
 
-    fn init(cx: &mut TestAppContext) {
+    struct Rig {
+        root: std::path::PathBuf,
+        project: Entity<Project>,
+        connection: Rc<StubAgentConnection>,
+        agents: Entity<ZedAgents>,
+        changes: UnboundedReceiver<HostChange>,
+        _dir: tempfile::TempDir,
+    }
+
+    async fn rig(connection: StubAgentConnection, cx: &mut TestAppContext) -> Rig {
         cx.executor().allow_parking();
         cx.update(|cx| {
             let settings = SettingsStore::test(cx);
             cx.set_global(settings);
         });
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {\n}\n").unwrap();
+        fs::write(root.join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let (sender, changes): (UnboundedSender<HostChange>, _) = unbounded();
+        let agents = cx.new(|cx| ZedAgents::new(root.clone(), sender, cx));
+        Rig {
+            root,
+            project,
+            connection: Rc::new(connection),
+            agents,
+            changes,
+            _dir: dir,
+        }
     }
 
-    async fn session(
-        connection: &Rc<StubAgentConnection>,
-        project: &Entity<Project>,
-        root: &Path,
-        cx: &mut TestAppContext,
-    ) -> Entity<AcpThread> {
-        cx.update(|cx| {
-            connection
-                .clone()
-                .new_session(project.clone(), PathList::new(&[root]), cx)
-        })
-        .await
-        .unwrap()
+    impl Rig {
+        async fn thread(&self, cx: &mut TestAppContext) -> Entity<AcpThread> {
+            let thread = cx
+                .update(|cx| {
+                    self.connection.clone().new_session(
+                        self.project.clone(),
+                        PathList::new(&[self.root.as_path()]),
+                        cx,
+                    )
+                })
+                .await
+                .unwrap();
+            self.agents
+                .update(cx, |agents, cx| agents.track(thread.clone(), cx));
+            thread
+        }
+
+        fn signals(&mut self, cx: &mut TestAppContext) -> Vec<AgentSignal> {
+            cx.run_until_parked();
+            let mut signals = Vec::new();
+            while let Ok(change) = self.changes.try_recv() {
+                if let HostChange::Agent { signal } = change {
+                    signals.push(signal);
+                }
+            }
+            signals
+        }
     }
 
     fn update(thread: &Entity<AcpThread>, update: acp_v1::SessionUpdate, cx: &mut TestAppContext) {
@@ -372,7 +502,7 @@ mod tests {
 
     fn call_started(id: &str, path: &Path, line: u32) -> acp_v1::SessionUpdate {
         acp_v1::SessionUpdate::ToolCall(
-            acp_v1::ToolCall::new(id.to_string(), "Edit")
+            acp_v1::ToolCall::new(id.to_string(), "Change main")
                 .kind(acp_v1::ToolKind::Edit)
                 .status(acp_v1::ToolCallStatus::Pending)
                 .locations(vec![acp_v1::ToolCallLocation::new(path).line(line)]),
@@ -386,176 +516,307 @@ mod tests {
         ))
     }
 
-    fn agent_signals(changes: &mut UnboundedReceiver<HostChange>) -> Vec<AgentSignal> {
-        let mut signals = Vec::new();
-        while let Ok(change) = changes.try_recv() {
-            if let HostChange::Agent { signal, .. } = change {
-                signals.push(signal);
-            }
-        }
-        signals
+    fn end(stop: acp_v1::StopReason) -> anyhow::Result<acp_v1::PromptResponse> {
+        Ok(acp_v1::PromptResponse::new(stop))
     }
 
-    fn thread_id(thread: &Entity<AcpThread>, cx: &mut TestAppContext) -> ThreadId {
+    fn id_of(thread: &Entity<AcpThread>, cx: &mut TestAppContext) -> ThreadId {
         thread.read_with(cx, |thread, _| ThreadId(thread.session_id().to_string()))
     }
 
-    fn edit_call(status: ToolStatus) -> ToolCall {
-        ToolCall {
-            id: "edit-1".into(),
-            kind: ToolKind::Edit,
-            status,
-            locations: vec![ToolLocation {
-                path: "src/main.rs".into(),
-                line: Some(2),
-            }],
+    /// The signals without names, which each state carries along.
+    fn unnamed(signals: Vec<AgentSignal>) -> Vec<AgentSignal> {
+        signals
+            .into_iter()
+            .filter(|signal| !matches!(signal, AgentSignal::Named { .. }))
+            .collect()
+    }
+
+    fn state(thread: &ThreadId, state: ThreadState) -> AgentSignal {
+        AgentSignal::Thread {
+            thread: thread.clone(),
+            state,
         }
     }
 
-    // One turn of a real agent thread, in the order the city needs: the thread is working before
-    // its call, the call carries its file and line through each status, the agent's edit is named
-    // before its text reaches the city, and the turn ends idle.
-    #[gpui::test]
-    async fn a_thread_turn_reaches_the_city_in_order(cx: &mut TestAppContext) {
-        init(cx);
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src/main.rs"), "fn main() {\n}\n").unwrap();
-        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
-        let (sender, changes) = unbounded();
-        let Source {
-            mut changes,
-            keep_alive,
-            ..
-        } = cx
-            .update(|cx| zed_feed::source(&project, sender.clone(), changes, cx))
-            .unwrap();
-        let agents = cx.new(|_| ZedAgents::new(root.clone(), sender));
-        let connection = Rc::new(StubAgentConnection::new());
-        let thread = session(&connection, &project, &root, cx).await;
-        agents.update(cx, |agents, cx| agents.track(thread.clone(), cx));
-        let id = thread_id(&thread, cx);
-        let buffer = project
-            .update(cx, |project, cx| {
-                project.open_local_buffer(root.join("src/main.rs"), cx)
-            })
-            .await
-            .unwrap();
-        cx.run_until_parked();
-        agent_signals(&mut changes);
+    fn edit_call(thread: &ThreadId, status: ToolStatus, path: &str) -> AgentSignal {
+        AgentSignal::ToolCall {
+            thread: thread.clone(),
+            call: ToolCall {
+                id: "edit-1".into(),
+                kind: ToolKind::Edit,
+                status,
+                title: Some("Change main".into()),
+                locations: vec![ToolLocation {
+                    path: path.into(),
+                    line: Some(2),
+                }],
+            },
+        }
+    }
 
-        let respond = connection.defer_next_prompt_response();
-        let turn = thread.update(cx, |thread, cx| thread.send(vec!["change main".into()], cx));
+    // One turn, in the order the city needs: named and working before its call, the call with its
+    // title, file and line through each status, then idle.
+    #[gpui::test]
+    async fn a_turn_is_named_working_then_each_call_status_then_idle(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["change".into()], cx));
         cx.run_until_parked();
-        update(
-            &thread,
-            call_started("edit-1", &root.join("src/main.rs"), 2),
-            cx,
-        );
+        let main = rig.root.join("src/main.rs");
+        update(&thread, call_started("edit-1", &main, 2), cx);
         update(
             &thread,
             call_status("edit-1", acp_v1::ToolCallStatus::InProgress),
             cx,
         );
-        buffer.update(cx, |buffer, cx| {
-            buffer.start_transaction();
-            buffer.edit([(0..0, "// agent\n")], None, cx);
-            buffer.end_transaction_with_source(BufferEditSource::Agent, cx);
-        });
-        cx.run_until_parked();
-        let mut sent = Vec::new();
-        while let Ok(change) = changes.try_recv() {
-            sent.push(change);
-        }
-        let edited = sent.iter().position(|change| {
-            matches!(change, HostChange::Agent { signal: AgentSignal::Edited { path }, .. } if path == "src/main.rs")
-        });
-        let text = sent.iter().position(|change| {
-            matches!(change, HostChange::Text { path, text: Some(_) } if path == "src/main.rs")
-        });
-        assert!(edited.is_some() && edited < text, "{sent:?}");
         update(
             &thread,
             call_status("edit-1", acp_v1::ToolCallStatus::Completed),
             cx,
         );
-        respond
-            .send(Ok(acp_v1::PromptResponse::new(acp_v1::StopReason::EndTurn)))
-            .unwrap();
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
         turn.await.unwrap();
-        cx.run_until_parked();
+        let signals = rig.signals(cx);
 
-        let mut signals: Vec<AgentSignal> = sent
-            .into_iter()
-            .filter_map(|change| match change {
-                HostChange::Agent { signal, .. } => Some(signal),
-                _ => None,
-            })
-            .collect();
-        signals.extend(agent_signals(&mut changes));
-        let call = |status| AgentSignal::ToolCall {
-            thread: id.clone(),
-            call: edit_call(status),
-        };
+        assert!(
+            matches!(
+                signals.first(),
+                Some(AgentSignal::Named { thread, title: _, agent: Some(_), parent: None })
+                    if *thread == id
+            ),
+            "{signals:?}"
+        );
         assert_eq!(
-            signals,
+            unnamed(signals),
             [
-                AgentSignal::Thread {
-                    thread: id.clone(),
-                    state: ThreadState::Working,
-                },
-                call(ToolStatus::Pending),
-                call(ToolStatus::InProgress),
-                AgentSignal::Edited {
-                    path: "src/main.rs".into(),
-                },
-                call(ToolStatus::Completed),
-                AgentSignal::Thread {
-                    thread: id.clone(),
-                    state: ThreadState::Idle,
-                },
+                state(&id, ThreadState::Working),
+                edit_call(&id, ToolStatus::Pending, "src/main.rs"),
+                edit_call(&id, ToolStatus::InProgress, "src/main.rs"),
+                edit_call(&id, ToolStatus::Completed, "src/main.rs"),
+                state(&id, ThreadState::Idle),
             ]
         );
-        drop(keep_alive);
+    }
+
+    // A live thread is confirmed again before the city would stop trusting it; an ended one is not.
+    #[gpui::test]
+    async fn a_live_thread_is_confirmed_on_a_heartbeat(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["wait".into()], cx));
+        rig.signals(cx);
+
+        cx.executor().advance_clock(HEARTBEAT);
+        assert_eq!(rig.signals(cx), [state(&id, ThreadState::Working)]);
+
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        rig.signals(cx);
+        cx.executor().advance_clock(HEARTBEAT);
+        assert_eq!(rig.signals(cx), []);
+    }
+
+    // A cancelled turn stops with its reason, a failed prompt is an error, and a thread that is
+    // closed is gone.
+    #[gpui::test]
+    async fn turns_end_stopped_or_in_error_and_closed_threads_are_gone(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["one".into()], cx));
+        cx.run_until_parked();
+        respond.send(end(acp_v1::StopReason::Cancelled)).unwrap();
+        turn.await.ok();
+        let ended = unnamed(rig.signals(cx));
+        assert_eq!(
+            ended.last(),
+            Some(&state(
+                &id,
+                ThreadState::Stopped {
+                    reason: StopReason::Cancelled
+                }
+            )),
+            "{ended:?}"
+        );
+
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["two".into()], cx));
+        cx.run_until_parked();
+        respond
+            .send(Err(anyhow::anyhow!("the agent failed")))
+            .unwrap();
+        turn.await.ok();
+        let failed = unnamed(rig.signals(cx));
+        assert!(
+            failed.contains(&state(&id, ThreadState::Error)),
+            "{failed:?}"
+        );
+
+        let closed = rig.thread(cx).await;
+        let closed_id = id_of(&closed, cx);
+        rig.signals(cx);
+        drop(closed);
+        // Entities are released when the app next flushes its effects.
+        cx.update(|_| {});
+        assert_eq!(rig.signals(cx), [state(&closed_id, ThreadState::Gone)]);
+    }
+
+    // A thread whose own work Zed has not confirmed yet is unknown, not idle.
+    #[gpui::test]
+    async fn an_unconfirmed_thread_is_unknown(cx: &mut TestAppContext) {
+        let mut rig = rig(
+            StubAgentConnection::new().with_receipt_submissions(true),
+            cx,
+        )
+        .await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        rig.signals(cx);
+        thread.update(cx, |thread, cx| thread.mark_activity_unconfirmed(cx));
+        assert_eq!(unnamed(rig.signals(cx)), [state(&id, ThreadState::Unknown)]);
+    }
+
+    // A call on a file outside the folder keeps its absolute path, so the city can say where.
+    #[gpui::test]
+    async fn a_call_outside_the_folder_keeps_its_absolute_path(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        let outside = tempfile::tempdir().unwrap();
+        let elsewhere = outside.path().canonicalize().unwrap().join("notes.md");
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["look".into()], cx));
+        cx.run_until_parked();
+        update(&thread, call_started("edit-1", &elsewhere, 2), cx);
+        let elsewhere = elsewhere.to_string_lossy().into_owned();
+        assert!(
+            unnamed(rig.signals(cx)).contains(&edit_call(&id, ToolStatus::Pending, &elsewhere)),
+            "{elsewhere}"
+        );
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+    }
+
+    // A subagent is followed as its own thread, named with the thread that started it.
+    #[gpui::test]
+    async fn a_subagent_is_followed_under_its_parent(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let parent = rig.thread(cx).await;
+        let parent_id = id_of(&parent, cx);
+        let child = cx
+            .update(|cx| {
+                rig.connection.clone().new_session(
+                    rig.project.clone(),
+                    PathList::new(&[rig.root.as_path()]),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        let child_id = id_of(&child, cx);
+        rig.signals(cx);
+        parent.update(cx, |thread, cx| thread.register_subagent(child.clone(), cx));
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = child.update(cx, |thread, cx| thread.send(vec!["help".into()], cx));
+        let signals = rig.signals(cx);
+        assert!(
+            signals.contains(&AgentSignal::Named {
+                thread: child_id.clone(),
+                title: child.read_with(cx, |thread, _| thread.title().map(|t| t.to_string())),
+                agent: signals.iter().find_map(|signal| match signal {
+                    AgentSignal::Named { agent, .. } => agent.clone(),
+                    _ => None,
+                }),
+                parent: Some(parent_id),
+            }),
+            "{signals:?}"
+        );
+        assert!(
+            unnamed(signals).contains(&state(&child_id, ThreadState::Working)),
+            "the subagent's turn is followed"
+        );
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+    }
+
+    // A later turn that shows an earlier turn's call again, unchanged, sends nothing new for it.
+    #[gpui::test]
+    async fn an_earlier_turns_call_is_not_sent_again(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        let main = rig.root.join("src/main.rs");
+
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["one".into()], cx));
+        cx.run_until_parked();
+        update(&thread, call_started("edit-1", &main, 2), cx);
+        update(
+            &thread,
+            call_status("edit-1", acp_v1::ToolCallStatus::Completed),
+            cx,
+        );
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        rig.signals(cx);
+
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["two".into()], cx));
+        cx.run_until_parked();
+        update(
+            &thread,
+            call_status("edit-1", acp_v1::ToolCallStatus::Completed),
+            cx,
+        );
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        assert_eq!(
+            unnamed(rig.signals(cx)),
+            [
+                state(&id, ThreadState::Working),
+                state(&id, ThreadState::Idle),
+            ]
+        );
     }
 
     // Two threads working at once stay two threads: each keeps its own id, state and calls.
     #[gpui::test]
     async fn two_threads_at_once_stay_apart(cx: &mut TestAppContext) {
-        init(cx);
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
-        fs::write(root.join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
-        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
-        let (sender, mut changes) = unbounded();
-        let agents = cx.new(|_| ZedAgents::new(root.clone(), sender));
-        let connection = Rc::new(StubAgentConnection::new());
-        let first = session(&connection, &project, &root, cx).await;
-        let second = session(&connection, &project, &root, cx).await;
-        for thread in [&first, &second] {
-            agents.update(cx, |agents, cx| agents.track(thread.clone(), cx));
-        }
-        let (first_id, second_id) = (thread_id(&first, cx), thread_id(&second, cx));
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let first = rig.thread(cx).await;
+        let second = rig.thread(cx).await;
+        let (first_id, second_id) = (id_of(&first, cx), id_of(&second, cx));
         assert_ne!(first_id, second_id);
 
-        let first_respond = connection.defer_next_prompt_response();
+        let first_respond = rig.connection.defer_next_prompt_response();
         let first_turn = first.update(cx, |thread, cx| thread.send(vec!["one".into()], cx));
         cx.run_until_parked();
-        let second_respond = connection.defer_next_prompt_response();
+        let second_respond = rig.connection.defer_next_prompt_response();
         let second_turn = second.update(cx, |thread, cx| thread.send(vec!["two".into()], cx));
         cx.run_until_parked();
-        update(&first, call_started("a", &root.join("src/main.rs"), 1), cx);
-        update(&second, call_started("b", &root.join("src/lib.rs"), 1), cx);
+        update(
+            &first,
+            call_started("a", &rig.root.join("src/main.rs"), 1),
+            cx,
+        );
+        update(
+            &second,
+            call_started("b", &rig.root.join("src/lib.rs"), 1),
+            cx,
+        );
         first_respond
-            .send(Ok(acp_v1::PromptResponse::new(acp_v1::StopReason::EndTurn)))
+            .send(end(acp_v1::StopReason::EndTurn))
             .unwrap();
         first_turn.await.unwrap();
-        cx.run_until_parked();
 
-        let signals = agent_signals(&mut changes);
+        let signals = unnamed(rig.signals(cx));
         let of = |id: &ThreadId| -> Vec<String> {
             signals
                 .iter()
@@ -573,22 +834,9 @@ mod tests {
         };
         assert_eq!(of(&first_id), ["Working", "a Pending src/main.rs", "Idle"]);
         assert_eq!(of(&second_id), ["Working", "b Pending src/lib.rs"]);
-
         second_respond
-            .send(Ok(acp_v1::PromptResponse::new(
-                acp_v1::StopReason::Cancelled,
-            )))
+            .send(end(acp_v1::StopReason::EndTurn))
             .unwrap();
         second_turn.await.unwrap();
-        cx.run_until_parked();
-        let ended = agent_signals(&mut changes);
-        assert_eq!(
-            ended.last(),
-            Some(&AgentSignal::Thread {
-                thread: second_id,
-                state: ThreadState::Stopped,
-            }),
-            "{ended:?}"
-        );
     }
 }

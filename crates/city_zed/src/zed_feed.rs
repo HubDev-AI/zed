@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use city_host::{Author, HostAuthor};
 use city_model::PathsChanged;
 use city_shell::{HostChange, Listing, Source};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -45,12 +46,19 @@ pub(crate) fn source(
     })
 }
 
+/// Unsaved text a buffer has handed to the city: its path, its version, and who wrote it.
+struct Held {
+    path: String,
+    version: clock::Global,
+    author: Option<HostAuthor>,
+}
+
 struct ZedFeed {
     worktree_id: WorktreeId,
     /// The files the city shows, as root-relative paths.
     shown: HashSet<String>,
     /// The path and version of the unsaved text each buffer has handed to the city.
-    held: HashMap<EntityId, (String, clock::Global)>,
+    held: HashMap<EntityId, Held>,
     /// Paths Zed just saved from a buffer, with the saved mtime: the worktree reports the same
     /// write once more, and the city has already reread it.
     saved: HashMap<String, Option<MTime>>,
@@ -90,7 +98,7 @@ impl ZedFeed {
         };
         for buffer in project.read(cx).opened_buffers(cx) {
             feed.watch_buffer(&buffer, cx);
-            feed.buffer_changed(&buffer, cx);
+            feed.buffer_changed(&buffer, None, cx);
         }
         feed
     }
@@ -132,7 +140,7 @@ impl ZedFeed {
         // A held file shows its unsaved text, and the city rereads the disk when the text is
         // dropped; Zed's save reports the write before or after `Saved`, so both orders end in
         // that one reread.
-        let held: HashSet<&String> = self.held.values().map(|(path, _)| path).collect();
+        let held: HashSet<&String> = self.held.values().map(|held| &held.path).collect();
         change.modified.retain(|path| {
             let saved = self.saved.remove(path);
             !held.contains(path)
@@ -140,7 +148,10 @@ impl ZedFeed {
                     .is_none_or(|saved| files_now.get(path).map(|(_, mtime)| *mtime) != Some(saved))
         });
         if !change.is_empty() {
-            self.send(HostChange::Paths(change));
+            self.send(HostChange::Paths {
+                change,
+                author: None,
+            });
         }
     }
 
@@ -153,13 +164,10 @@ impl ZedFeed {
             buffer,
             |this, buffer, event: &BufferEvent, cx| match event {
                 BufferEvent::Edited { source } => {
-                    if *source == BufferEditSource::Agent {
-                        this.agent_edited(&buffer, cx);
-                    }
-                    this.buffer_changed(&buffer, cx)
+                    this.buffer_changed(&buffer, edit_author(*source), cx)
                 }
                 BufferEvent::DirtyChanged | BufferEvent::Reloaded => {
-                    this.buffer_changed(&buffer, cx)
+                    this.buffer_changed(&buffer, None, cx)
                 }
                 BufferEvent::Saved => this.buffer_saved(&buffer, cx),
                 _ => {}
@@ -176,41 +184,44 @@ impl ZedFeed {
             .map(|file| file.path().as_unix_str().to_string())
     }
 
-    /// Tells the city an agent wrote into the buffer, before the text it wrote arrives.
-    fn agent_edited(&self, buffer: &Entity<Buffer>, cx: &App) {
-        if let Some(path) = self.path_in_worktree(buffer.read(cx), cx) {
-            self.send(crate::zed_agents::edited(path));
-        }
-    }
-
-    /// Hands the buffer's text to the city while it differs from the disk, and takes it back
-    /// once it does not. One edit also flips the dirty bit, so a version already handed over is
-    /// not sent again.
-    fn buffer_changed(&mut self, buffer: &Entity<Buffer>, cx: &App) {
+    /// Hands the buffer's text to the city while it differs from the disk, credited to `author`,
+    /// and takes it back once it does not. One edit also flips the dirty bit, so a version
+    /// already handed over is not sent again. A reload from disk leaves the buffer clean, so its
+    /// untagged edit never reaches the city as the user's.
+    fn buffer_changed(&mut self, buffer: &Entity<Buffer>, author: Option<HostAuthor>, cx: &App) {
         let id = buffer.entity_id();
         let buffer = buffer.read(cx);
         let version = buffer.version();
         let held = self
             .path_in_worktree(buffer, cx)
             .filter(|_| buffer.is_dirty());
-        if let Some((old, old_version)) = self.held.get(&id) {
-            if held.as_ref() == Some(old) && *old_version == version {
+        if let Some(held_now) = self.held.get(&id) {
+            if held.as_ref() == Some(&held_now.path) && held_now.version == version {
                 return;
             }
         }
-        if let Some((old, _)) = self.held.remove(&id) {
-            if held.as_ref() != Some(&old) {
+        if let Some(old) = self.held.remove(&id) {
+            if held.as_ref() != Some(&old.path) {
                 self.send(HostChange::Text {
-                    path: old,
+                    path: old.path,
                     text: None,
+                    author: None,
                 });
             }
         }
         if let Some(path) = held {
-            self.held.insert(id, (path.clone(), version));
+            self.held.insert(
+                id,
+                Held {
+                    path: path.clone(),
+                    version,
+                    author: author.clone(),
+                },
+            );
             self.send(HostChange::Text {
                 path,
                 text: Some(Arc::from(buffer.text())),
+                author,
             });
         }
     }
@@ -224,26 +235,47 @@ impl ZedFeed {
             return;
         };
         self.saved.insert(path.clone(), buffer.saved_mtime());
-        let stale = self
-            .held
-            .remove(&id)
-            .map(|(old, _)| old)
-            .filter(|old| *old != path);
-        self.send(HostChange::Text { path, text: None });
+        let held = self.held.remove(&id);
+        let author = held.as_ref().and_then(|held| held.author.clone());
+        let stale = held.map(|held| held.path).filter(|old| *old != path);
+        self.send(HostChange::Text {
+            path,
+            text: None,
+            author,
+        });
         if let Some(old) = stale {
             self.send(HostChange::Text {
                 path: old,
                 text: None,
+                author: None,
             });
         }
     }
 
     fn buffer_released(&mut self, id: EntityId) {
         self.buffers.remove(&id);
-        if let Some((path, _)) = self.held.remove(&id) {
-            self.send(HostChange::Text { path, text: None });
+        if let Some(held) = self.held.remove(&id) {
+            self.send(HostChange::Text {
+                path: held.path,
+                text: None,
+                author: None,
+            });
         }
     }
+}
+
+/// Who wrote a buffer edit, as far as the buffer says: an agent tool, or a person here. Edits
+/// from another replica name no one.
+fn edit_author(source: BufferEditSource) -> Option<HostAuthor> {
+    let author = match source {
+        BufferEditSource::Agent => Author::Agent,
+        BufferEditSource::User => Author::User,
+        BufferEditSource::Remote => return None,
+    };
+    Some(HostAuthor {
+        author,
+        thread: None,
+    })
 }
 
 /// One worktree batch as the city's changes. The batch's change kinds are only hints: whether a
@@ -298,10 +330,12 @@ mod tests {
         time::{Duration, Instant},
     };
 
+    use city_host::{Author, HostAuthor};
     use city_model::PathsChanged;
     use city_shell::{HostChange, Listing, Source};
     use futures::channel::mpsc::UnboundedReceiver;
     use gpui::TestAppContext;
+    use language::BufferEditSource;
     use project::{Project, ProjectEntryId, RealFs};
     use settings::SettingsStore;
 
@@ -391,7 +425,7 @@ mod tests {
     fn paths(sent: &[HostChange]) -> PathsChanged {
         let mut merged = PathsChanged::default();
         for change in sent {
-            if let HostChange::Paths(change) = change {
+            if let HostChange::Paths { change, .. } = change {
                 merged.merge(change.clone());
             }
         }
@@ -447,6 +481,10 @@ mod tests {
             [HostChange::Text {
                 path: "src/main.rs".into(),
                 text: Some("// held\nfn main() {}\n".into()),
+                author: Some(HostAuthor {
+                    author: Author::User,
+                    thread: None,
+                }),
             }]
         );
 
@@ -458,12 +496,56 @@ mod tests {
         let rereads = sent
             .iter()
             .filter(|change| match change {
-                HostChange::Text { path, text: None } => path == "src/main.rs",
-                HostChange::Paths(change) => change.modified.iter().any(|p| p == "src/main.rs"),
+                HostChange::Text {
+                    path, text: None, ..
+                } => path == "src/main.rs",
+                HostChange::Paths { change, .. } => {
+                    change.modified.iter().any(|p| p == "src/main.rs")
+                }
                 HostChange::Text { .. } | HostChange::Agent { .. } => false,
             })
             .count();
         assert_eq!(rereads, 1, "{sent:?}");
+
+        // A write to disk under the clean buffer reloads it with an untagged edit; that is not
+        // the user typing, so no text reaches the city as the user's.
+        fs::write(root.join("src/main.rs"), "fn main() { reloaded() }\n").unwrap();
+        let sent = settled(&mut changes, cx);
+        assert!(
+            sent.iter().all(|change| !matches!(
+                change,
+                HostChange::Text {
+                    author: Some(HostAuthor {
+                        author: Author::User,
+                        ..
+                    }),
+                    ..
+                }
+            )),
+            "{sent:?}"
+        );
+        assert_eq!(paths(&sent).modified, ["src/main.rs"], "{sent:?}");
+
+        buffer.update(cx, |buffer, cx| {
+            buffer.start_transaction();
+            buffer.edit([(0..0, "// agent\n")], None, cx);
+            buffer.end_transaction_with_source(BufferEditSource::Agent, cx);
+        });
+        let sent = settled(&mut changes, cx);
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [HostChange::Text {
+                    text: Some(_),
+                    author: Some(HostAuthor {
+                        author: Author::Agent,
+                        thread: None,
+                    }),
+                    ..
+                }]
+            ),
+            "{sent:?}"
+        );
 
         fs::rename(root.join("src/parse.rs"), root.join("src/read.rs")).unwrap();
         let sent = settled(&mut changes, cx);
