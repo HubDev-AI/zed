@@ -2,15 +2,15 @@
 
 Every Zed API `city_zed` uses, with its place at `v1.28.1` (`e8bc16acee`). At a tag bump:
 
-1. Give the new tag its own base branch on the fork, at exactly the tag's commit: `git push origin <new-commit>:refs/heads/eof-<new>`. Older base branches stay as they are; a tag is never a descendant of the last one, so no base branch moves.
+1. Give the new tag its own base branch on the fork, at exactly the tag's commit: `git push origin <new-commit>:refs/heads/eof-<new>`. Older base branches stay as they are, so each tag's pull request keeps its exact review base.
 2. Rebase the fork branch onto the tag: `git rebase --onto <new> <old> <branch>`. `script/fork-apply` stops when `crates/city_zed` is not there yet.
 3. Start from the tag's lock and run fork-apply (eof is private): `git checkout <new> -- Cargo.lock && CARGO_NET_GIT_FETCH_WITH_CLI=true script/fork-apply`. Do this whenever the eof pin moves too, so Zed's own crates keep the tag's versions and only what eof needs newer moves.
 4. Move eof's `gpui` pin to the same tag, point `city_zed` at that eof revision and repeat step 3.
 5. Find the upstream changes the compiler will name, then check each line below:
    - `git diff <old> <new> -- Cargo.toml | grep agent-client-protocol`
    - `git diff <old> <new> -- crates/acp_thread/src/acp_thread.rs | grep -A3 'pub enum'`
-6. Build and test. Without Xcode's Metal toolchain the shaders compile only at run time, hence the features:
-   - `cargo build --profile release-fast -p zed --features gpui_platform/runtime_shaders`
+6. Build and test. Without Xcode's Metal toolchain the shaders compile only at run time, hence the features. The release channel is fixed at build time and the tag's is stable, which would share the installed Zed's single-instance port and database and check for updates, so build on the dev channel:
+   - `ZED_RELEASE_CHANNEL=dev ZED_UPDATE_EXPLANATION="This build does not update itself." cargo build --profile release-fast -p zed --features gpui_platform/runtime_shaders`
    - `cargo test -p city_zed --features gpui_apple/runtime_shaders`
 7. Push the branch with `--force-with-lease=<branch>:<its old head>` and retarget its pull request: `gh pr edit <number> --base eof-<new>`. Its diff is then only the fork's own change.
 
@@ -40,14 +40,14 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 
 | API | at v1.28.1 |
 |---|---|
-| `Project::is_local`, `visible_worktrees`, `worktree_for_id`, `opened_buffers`, `buffer_store` | `crates/project/src/project.rs:1106`, `:2522`, `:2585`, `:2360`, `:6767` |
+| `Project::is_local`, `visible_worktrees`, `worktree_for_id`, `opened_buffers`, `buffer_store` | `crates/project/src/project.rs:3152`, `:2522`, `:2585`, `:2360`, `:6767` |
 | `project::Event::WorktreeUpdatedEntries`, `UpdatedEntriesSet` | `project.rs:384`, `crates/worktree/src/worktree.rs:4068` |
 | `Worktree::snapshot`; `Snapshot::id`, `abs_path`, `files`, `entry_for_path` | `worktree.rs:823`, `:2554`, `:2570`, `:2835`, `:2907` |
 | `Entry { id, mtime, is_ignored }`, `is_file` | `worktree.rs:3987`, `:4196` |
 | `BufferStoreEvent::BufferAdded` | `crates/project/src/buffer_store.rs:92` |
 | `BufferEvent::{Edited { source }, DirtyChanged, Saved, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |
 | `Buffer::file`, `is_dirty`, `saved_mtime`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:1533`, `:373`, `:395` |
-| `text::Buffer::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
+| `text::BufferSnapshot::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
 | `RelPath::as_unix_str`, `fs::MTime` | `crates/path/src/rel_path.rs:268`, `fs.rs:341` |
 | `Project::fs`; `Fs::open_sync` (the reader blocks on it, so it must not hop onto the background executor), `ReadSeek` | `project.rs:2396`; `fs.rs:137`, `:79` |
 
