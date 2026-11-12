@@ -22,6 +22,9 @@ fail() {
     exit 1
 }
 
+[[ -f crates/city_zed/Cargo.toml ]] ||
+    fail "crates/city_zed is missing; bring it across from the fork branch before running this"
+
 # Inserts `$2` on the line after the first line equal to `$3` in file `$1`.
 insert_after() {
     local file=$1 text=$2 anchor=$3
