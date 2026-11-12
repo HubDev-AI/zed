@@ -985,4 +985,23 @@ mod tests {
             "{sent:?}"
         );
     }
+
+    // A reload that finds the disk already equal to the unsaved text changes no text, so only
+    // Zed's Reloaded event tells the city the buffer is clean again.
+    #[gpui::test]
+    async fn a_reload_without_a_text_change_takes_the_text_back(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let mut source = rig.source(cx);
+        let buffer = rig.edited_buffer(cx).await;
+        settled(&mut source.changes, cx);
+        let text = buffer.read_with(cx, |buffer, _| buffer.text());
+        fs::write(rig.root.join("main.rs"), text).unwrap();
+        settled(&mut source.changes, cx);
+        let reloaded = buffer.update(cx, |buffer, cx| buffer.reload(cx));
+        let mut sent = settled(&mut source.changes, cx);
+        reloaded.await.unwrap();
+        sent.extend(settled(&mut source.changes, cx));
+        assert!(!buffer.read_with(cx, |buffer, _| buffer.is_dirty()));
+        assert!(sent.contains(&dropped("main.rs")), "{sent:?}");
+    }
 }
