@@ -16,7 +16,8 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription};
 use language::{Buffer, BufferEditSource, BufferEvent};
 use project::{
-    MTime, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId, buffer_store::BufferStoreEvent,
+    Entry, MTime, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId,
+    buffer_store::BufferStoreEvent,
 };
 use util::ResultExt as _;
 
@@ -37,6 +38,7 @@ pub(crate) fn source(
     let root = snapshot.abs_path().to_path_buf();
     let listing: Vec<String> = snapshot
         .files(false, 0)
+        .filter(|entry| shown(entry))
         .map(|entry| entry.path.as_unix_str().to_string())
         .collect();
     let shown = listing.iter().cloned().collect();
@@ -52,6 +54,12 @@ pub(crate) fn source(
         changes,
         keep_alive: Box::new(feed),
     })
+}
+
+/// A file the city shows: what Zed's own file traversal lists, less named pipes, which block the
+/// reader that opens them.
+fn shown(entry: &Entry) -> bool {
+    entry.is_file() && !entry.is_fifo && (!entry.is_ignored || entry.is_always_included)
 }
 
 /// Saved contents of the folder's files, read through Zed's `Fs`.
@@ -162,8 +170,7 @@ impl ZedFeed {
             .iter()
             .filter_map(|(path, _, _)| {
                 let entry = snapshot.entry_for_path(path)?;
-                (entry.is_file() && !entry.is_ignored)
-                    .then(|| (path.as_unix_str().to_string(), (entry.id, entry.mtime)))
+                shown(entry).then(|| (path.as_unix_str().to_string(), (entry.id, entry.mtime)))
             })
             .collect();
         let batch = entries
@@ -594,5 +601,91 @@ mod tests {
             "{sent:?}"
         );
         drop(keep_alive);
+    }
+
+    async fn make_fifo(path: &std::path::Path) {
+        let status = util::command::new_command("mkfifo")
+            .arg(path)
+            .status()
+            .await
+            .unwrap();
+        assert!(status.success());
+    }
+
+    // Opening a named pipe blocks until a writer comes, which would stall the city's first scan
+    // forever, whether the pipe was there at the start or appears later.
+    #[gpui::test]
+    async fn a_named_pipe_is_never_shown(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("plain.txt"), "plain\n").unwrap();
+        make_fifo(&root.join("pipe")).await;
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let mut source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap()
+        });
+        assert_eq!(source.listing, ["plain.txt"]);
+        settled(&mut source.changes, cx);
+        make_fifo(&root.join("later")).await;
+        let sent = settled(&mut source.changes, cx);
+        assert!(
+            !paths(&sent).created.iter().any(|path| path == "later"),
+            "{sent:?}"
+        );
+    }
+
+    // Zed's file_scan_inclusions bring a git-ignored file back into the worktree; the city lists it
+    // as Zed does, so an edit must not then remove it.
+    #[gpui::test]
+    async fn an_ignored_file_zed_scans_anyway_stays_shown_when_edited(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        cx.update(|cx| {
+            gpui::BorrowAppContext::update_global::<SettingsStore, _>(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.project.worktree.file_scan_inclusions =
+                        Some(settings::SplicingVec::from(vec![
+                            "build/keep.txt".to_string(),
+                        ]));
+                });
+            });
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("build/keep.txt"), "keep\n").unwrap();
+        fs::write(root.join("build/other.txt"), "other\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        settled_project(cx);
+        let mut source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap()
+        });
+        settled(&mut source.changes, cx);
+        fs::write(root.join("build/keep.txt"), "keep, edited\n").unwrap();
+        let sent = settled(&mut source.changes, cx);
+        assert!(source.listing.iter().any(|path| path == "build/keep.txt"));
+        assert!(!source.listing.iter().any(|path| path == "build/other.txt"));
+        assert_eq!(paths(&sent).modified, ["build/keep.txt"], "{sent:?}");
+        assert!(paths(&sent).deleted.is_empty(), "{sent:?}");
+    }
+
+    fn settled_project(cx: &mut TestAppContext) {
+        for _ in 0..50 {
+            cx.executor().advance_clock(project::FS_WATCH_LATENCY);
+            cx.run_until_parked();
+            std::thread::sleep(POLL);
+        }
     }
 }
