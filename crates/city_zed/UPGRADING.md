@@ -2,15 +2,17 @@
 
 Every Zed API `city_zed` uses, with its place at `v1.28.1` (`e8bc16acee`). At a tag bump:
 
-1. Bring the fork's commits, with `crates/city_zed` and `script/fork-apply`, onto the new tag. `script/fork-apply` stops when `crates/city_zed` is not there yet.
-2. Run `CARGO_NET_GIT_FETCH_WITH_CLI=true script/fork-apply` (eof is private).
-3. Move eof's `gpui` pin to the same tag, point `city_zed` at that eof revision and run `script/fork-apply` again to resolve the lock.
-4. Find the upstream changes the compiler will name, then check each line below:
+1. Give the new tag its own base branch on the fork, at exactly the tag's commit: `git push origin <new-commit>:refs/heads/eof-<new>`. Older base branches stay as they are; a tag is never a descendant of the last one, so no base branch moves.
+2. Rebase the fork branch onto the tag: `git rebase --onto <new> <old> <branch>`. `script/fork-apply` stops when `crates/city_zed` is not there yet.
+3. Run `CARGO_NET_GIT_FETCH_WITH_CLI=true script/fork-apply` (eof is private).
+4. Move eof's `gpui` pin to the same tag, point `city_zed` at that eof revision and run `script/fork-apply` again to resolve the lock.
+5. Find the upstream changes the compiler will name, then check each line below:
    - `git diff <old> <new> -- Cargo.toml | grep agent-client-protocol`
    - `git diff <old> <new> -- crates/acp_thread/src/acp_thread.rs | grep -A3 'pub enum'`
-5. Build and test. Without Xcode's Metal toolchain the shaders compile only at run time, hence the features:
+6. Build and test. Without Xcode's Metal toolchain the shaders compile only at run time, hence the features:
    - `cargo build --profile release-fast -p zed --features gpui_platform/runtime_shaders`
    - `cargo test -p city_zed --features gpui_apple/runtime_shaders`
+7. Push the branch with `--force-with-lease=<branch>:<its old head>` and retarget its pull request: `gh pr edit <number> --base eof-<new>`. Its diff is then only the fork's own change.
 
 The only Zed files `script/fork-apply` changes are:
 - the root `Cargo.toml`;
