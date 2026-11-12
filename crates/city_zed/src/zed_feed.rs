@@ -214,6 +214,8 @@ impl ZedFeed {
                 BufferEvent::DirtyChanged
                 | BufferEvent::Reloaded
                 | BufferEvent::FileHandleChanged => this.flush(&buffer, cx),
+                // A save writes the text of the moment it started, so newer typing stays unsaved.
+                BufferEvent::Saved if buffer.read(cx).is_dirty() => this.flush(&buffer, cx),
                 BufferEvent::Saved => {
                     this.pending.remove(&buffer.entity_id());
                     this.buffer_saved(&buffer, cx)
@@ -948,5 +950,39 @@ mod tests {
             source(&project, sender, changes, cx)
         });
         assert!(source.is_none());
+    }
+
+    // A save writes the text of the moment it started; typing that lands before it finishes stays
+    // unsaved, so the city must keep showing the buffer, not the file the save wrote.
+    #[gpui::test]
+    async fn a_save_finishing_under_newer_typing_keeps_the_newer_text(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let mut source = rig.source(cx);
+        let buffer = rig.edited_buffer(cx).await;
+        settled(&mut source.changes, cx);
+        buffer.update(cx, |buffer, cx| {
+            buffer.edit([(0..0, "saved edit\n")], None, cx)
+        });
+        let save = rig
+            .project
+            .update(cx, |project, cx| project.save_buffer(buffer.clone(), cx));
+        buffer.update(cx, |buffer, cx| {
+            buffer.edit([(0..0, "new unsaved edit\n")], None, cx)
+        });
+        save.await.unwrap();
+        let sent = settled(&mut source.changes, cx);
+        assert!(buffer.read_with(cx, |buffer, _| buffer.is_dirty()));
+        let current = buffer.read_with(cx, |buffer, _| buffer.text());
+        let last_text = sent
+            .iter()
+            .rev()
+            .find(|change| matches!(change, HostChange::Text { .. }));
+        assert!(
+            matches!(
+                last_text,
+                Some(HostChange::Text { text: Some(text), .. }) if text.as_ref() == current
+            ),
+            "{sent:?}"
+        );
     }
 }
