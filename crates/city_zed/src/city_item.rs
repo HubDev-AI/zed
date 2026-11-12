@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc, time::Instant};
+use std::{any::Any, sync::Arc};
 
 use agent_ui::AgentPanel;
 use city_shell::{CityShell, Source};
@@ -93,7 +93,6 @@ impl CityItem {
             return item;
         };
         item._keep_alive = std::mem::replace(&mut source.keep_alive, Box::new(()));
-        let started = Instant::now();
         let root = source.root.clone();
         let text_system = Arc::new(gpui_apple::AppleTextSystem::new());
         let opening = city_shell::open(source, text_system, cx);
@@ -102,20 +101,6 @@ impl CityItem {
             this.update_in(cx, |this, window, cx| {
                 match opened {
                     Ok(shell) => {
-                        log::info!(
-                            "city: {root:?} ready {} ms after open",
-                            started.elapsed().as_millis()
-                        );
-                        // Next-frame callbacks run before that frame draws, so the second one
-                        // runs once the frame that first draws the city is done.
-                        window.on_next_frame(move |window, _| {
-                            window.on_next_frame(move |_, _| {
-                                log::info!(
-                                    "city: first frame drawn {} ms after open",
-                                    started.elapsed().as_millis()
-                                );
-                            });
-                        });
                         if this.focus.is_focused(window) {
                             shell.focus_handle(cx).focus(window, cx);
                         }
@@ -201,7 +186,6 @@ mod tests {
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
     const WATCHED_POLL: Duration = Duration::from_millis(50);
-    const OPEN_DEADLINE: Duration = Duration::from_secs(120);
 
     fn test_settings() -> city_settings::Settings {
         city_settings::Settings {
@@ -325,57 +309,5 @@ mod tests {
         cx.update(|_, _| {});
         cx.run_until_parked();
         assert!(follower.upgrade().is_none());
-    }
-
-    // Off-screen open-to-ready time of the tab, on this checkout and on a small folder, for a first
-    // open and a reopen. Run with `--ignored --nocapture` in a release profile.
-    #[gpui::test]
-    #[ignore = "measurement, not a check"]
-    async fn open_to_ready_time(cx: &mut TestAppContext) {
-        cx.executor().allow_parking();
-        cx.update(|cx| {
-            let settings = SettingsStore::test(cx);
-            cx.set_global(settings);
-            city_shell::init(test_settings(), cx);
-        });
-        let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .unwrap();
-        let small = tempfile::tempdir().unwrap();
-        put(small.path(), "Cargo.toml", "[package]\nname = \"demo\"\n");
-        put(small.path(), "src/main.rs", "mod parse;\nfn main() {}\n");
-        put(small.path(), "src/parse.rs", "pub fn parse() {}\n");
-        put(small.path(), "README.md", "A demo.\n");
-        for (name, root) in [
-            ("small folder", small.path()),
-            ("Zed source", checkout.as_path()),
-        ] {
-            let project = Project::test(RealFs::new(None, cx.executor()), [root], cx).await;
-            // The test executor runs the project's own background work on this thread, so it is
-            // finished first rather than timed as the city's.
-            cx.run_until_parked();
-            for attempt in ["first open", "reopen"] {
-                let started = Instant::now();
-                let (item, cx) =
-                    cx.add_window_view(|window, cx| CityItem::new(&project, None, window, cx));
-                let files = loop {
-                    cx.run_until_parked();
-                    let files = item.read_with(cx, |item, cx| {
-                        item.shell().map(|shell| shell.read(cx).file_count())
-                    });
-                    if let Some(files) = files {
-                        break files;
-                    }
-                    assert!(started.elapsed() < OPEN_DEADLINE, "{name} never opened");
-                    std::thread::sleep(Duration::from_millis(1));
-                };
-                println!(
-                    "{name}, {attempt}: {files} files, ready {} ms after open",
-                    started.elapsed().as_millis()
-                );
-                cx.update(|window, _| window.remove_window());
-            }
-        }
     }
 }

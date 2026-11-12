@@ -32,7 +32,6 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `Workspace::items_of_type`, `activate_item`, `add_item_to_active_pane` | `workspace.rs:4405`, `:5761`, `:5055` |
 | `Workspace::project`, `panel::<AgentPanel>` | `workspace.rs:2939`, `:4942` |
 | `workspace::Item`, `tab_content_text` | `crates/workspace/src/item.rs:170`, `:187` |
-| `Window::on_next_frame` (runs before that frame draws) | `crates/gpui/src/window.rs:2922` |
 | `gpui_apple::AppleTextSystem::new` (`font-kit` feature) | `crates/gpui_apple/src/text_system.rs:84` |
 | `<dyn Fs>::global`, `paths::settings_file` | `crates/fs/src/fs.rs:285`, `crates/paths/src/paths.rs:278` |
 
