@@ -213,12 +213,22 @@ impl ZedFeed {
                 BufferEvent::DirtyChanged | BufferEvent::Reloaded => {
                     this.buffer_changed(&buffer, None, cx)
                 }
+                BufferEvent::FileHandleChanged => this.flush(&buffer, cx),
                 BufferEvent::Saved => this.buffer_saved(&buffer, cx),
                 _ => {}
             },
         );
         let release = cx.observe_release(buffer, move |this, _, _| this.buffer_released(id));
         self.buffers.insert(id, [events, release]);
+    }
+
+    /// Hands over the buffer's text now, credited to whoever wrote the text the city holds.
+    fn flush(&mut self, buffer: &Entity<Buffer>, cx: &App) {
+        let author = self
+            .held
+            .get(&buffer.entity_id())
+            .and_then(|held| held.author.clone());
+        self.buffer_changed(buffer, author, cx);
     }
 
     fn path_in_worktree(&self, buffer: &Buffer, cx: &App) -> Option<String> {
@@ -687,5 +697,53 @@ mod tests {
             cx.run_until_parked();
             std::thread::sleep(POLL);
         }
+    }
+
+    // The city drops held text for a path it no longer shows, so a file renamed under unsaved
+    // edits must hand that text over again under its new path, still the user's.
+    #[gpui::test]
+    async fn renaming_a_file_with_unsaved_text_keeps_that_text(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("before.rs"), "fn main() {}\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let mut source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap()
+        });
+        settled(&mut source.changes, cx);
+        let buffer = project
+            .update(cx, |project, cx| {
+                project.open_local_buffer(root.join("before.rs"), cx)
+            })
+            .await
+            .unwrap();
+        buffer.update(cx, |buffer, cx| {
+            buffer.edit([(0..0, "// unsaved\n")], None, cx)
+        });
+        settled(&mut source.changes, cx);
+        fs::rename(root.join("before.rs"), root.join("after.rs")).unwrap();
+        let sent = settled(&mut source.changes, cx);
+        assert_eq!(
+            paths(&sent).renamed,
+            [("before.rs".to_string(), "after.rs".to_string())],
+            "{sent:?}"
+        );
+        assert!(
+            sent.contains(&HostChange::Text {
+                path: "after.rs".into(),
+                text: Some("// unsaved\nfn main() {}\n".into()),
+                author: Some(HostAuthor {
+                    author: Author::User,
+                    thread: None,
+                }),
+            }),
+            "{sent:?}"
+        );
     }
 }
