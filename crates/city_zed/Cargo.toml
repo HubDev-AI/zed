@@ -1,0 +1,52 @@
+[package]
+name = "city_zed"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/city_zed.rs"
+doctest = false
+
+[dependencies]
+gpui.workspace = true
+workspace.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+acp_thread.workspace = true
+agent-client-protocol.workspace = true
+agent_ui.workspace = true
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
+clock.workspace = true
+fs.workspace = true
+futures.workspace = true
+gpui_apple = { workspace = true, features = ["font-kit"] }
+language.workspace = true
+log.workspace = true
+paths.workspace = true
+project.workspace = true
+serde_json.workspace = true
+settings.workspace = true
+settings_json = { workspace = true, features = ["editing"] }
+util.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+acp_thread = { workspace = true, features = ["test-support"] }
+agent.workspace = true
+agent_ui = { workspace = true, features = ["test-support"] }
+anyhow.workspace = true
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f", features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+language_model = { workspace = true, features = ["test-support"] }
+project = { workspace = true, features = ["test-support"] }
+remote_connection = { workspace = true, features = ["test-support"] }
+settings = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+workspace = { workspace = true, features = ["test-support"] }

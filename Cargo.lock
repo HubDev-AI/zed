@@ -506,7 +506,7 @@ dependencies = [
  "language_models",
  "languages",
  "log",
- "lru",
+ "lru 0.16.4",
  "lsp",
  "markdown",
  "menu",
@@ -1673,7 +1673,7 @@ dependencies = [
  "http 0.2.12",
  "http 1.3.1",
  "http-body 1.0.1",
- "lru",
+ "lru 0.16.4",
  "percent-encoding",
  "regex-lite",
  "sha2",
@@ -2339,7 +2339,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
 dependencies = [
- "objc2 0.6.3",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -2758,6 +2758,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo_toml"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82f4b26e751e711a5302649417f2da046dce6391b2ea30a4820f37462314f0b9"
+dependencies = [
+ "semver",
+ "serde",
+ "toml 1.2.1+spec-1.1.0",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2939,6 +2950,210 @@ dependencies = [
  "crypto-common",
  "inout",
  "zeroize",
+]
+
+[[package]]
+name = "city_core"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_nav_model",
+ "gpui",
+]
+
+[[package]]
+name = "city_derive"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_lang",
+ "city_model",
+ "city_purpose",
+]
+
+[[package]]
+name = "city_host"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_model",
+ "futures 0.3.34",
+]
+
+[[package]]
+name = "city_lang"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_model",
+]
+
+[[package]]
+name = "city_layout"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_model",
+ "nalgebra",
+ "serde",
+]
+
+[[package]]
+name = "city_model"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+
+[[package]]
+name = "city_nav_model"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "glam 0.34.3",
+]
+
+[[package]]
+name = "city_purpose"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+
+[[package]]
+name = "city_registry"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_host",
+ "city_model",
+ "city_nav_model",
+ "gpui",
+]
+
+[[package]]
+name = "city_render"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "lru 0.19.0",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-video",
+ "objc2-metal 0.3.2",
+ "pollster 0.4.0",
+ "wgpu",
+]
+
+[[package]]
+name = "city_settings"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_view",
+ "futures 0.3.34",
+ "hud_kit",
+ "serde",
+]
+
+[[package]]
+name = "city_shell"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "anyhow",
+ "city_core",
+ "city_derive",
+ "city_host",
+ "city_lang",
+ "city_layout",
+ "city_model",
+ "city_render",
+ "city_settings",
+ "city_view",
+ "eco_cargo",
+ "eco_nix",
+ "eco_npm",
+ "eco_python",
+ "eco_ruby",
+ "futures 0.3.34",
+ "gpui",
+ "hud_agents",
+ "hud_benchmarks",
+ "hud_breadcrumb",
+ "hud_kit",
+ "hud_map",
+ "hud_view_settings",
+ "input_keys",
+ "input_pointer",
+ "input_trackpad",
+ "lang_assets",
+ "lang_git",
+ "lang_ini",
+ "lang_json",
+ "lang_markdown",
+ "lang_rust",
+ "lang_text",
+ "lang_toml",
+ "lang_xml",
+ "lang_yaml",
+ "lens_edit_tool",
+ "lens_live_edits",
+ "lens_presence",
+ "lens_under_work",
+ "nav_step",
+]
+
+[[package]]
+name = "city_view"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_host",
+ "city_lang",
+ "city_layout",
+ "city_model",
+ "city_nav_model",
+ "city_purpose",
+ "city_registry",
+ "city_render",
+ "fnv",
+ "glam 0.34.3",
+ "gpui",
+ "serde",
+]
+
+[[package]]
+name = "city_zed"
+version = "0.1.0"
+dependencies = [
+ "acp_thread",
+ "agent",
+ "agent-client-protocol",
+ "agent_ui",
+ "anyhow",
+ "city_host",
+ "city_model",
+ "city_settings",
+ "city_shell",
+ "clock",
+ "fs",
+ "futures 0.3.34",
+ "gpui",
+ "gpui_apple",
+ "language",
+ "language_model",
+ "log",
+ "paths",
+ "project",
+ "remote_connection",
+ "serde_json",
+ "settings",
+ "settings_json",
+ "tempfile",
+ "util",
+ "workspace",
 ]
 
 [[package]]
@@ -3872,7 +4087,7 @@ dependencies = [
  "ndk-context",
  "num-derive",
  "num-traits",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-audio-toolbox",
  "objc2-avf-audio",
  "objc2-core-audio",
@@ -5023,7 +5238,7 @@ checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -5200,6 +5415,48 @@ dependencies = [
  "elliptic-curve",
  "rfc6979",
  "signature 1.6.4",
+]
+
+[[package]]
+name = "eco_cargo"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "cargo_toml 1.0.1",
+ "city_lang",
+]
+
+[[package]]
+name = "eco_nix"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+]
+
+[[package]]
+name = "eco_npm"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "serde_json",
+]
+
+[[package]]
+name = "eco_python"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+]
+
+[[package]]
+name = "eco_ruby"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
 ]
 
 [[package]]
@@ -7192,6 +7449,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
+name = "glam"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "556f6b2ea90b8d15a74e0e7bb41671c9bdf38cd9f78c284d750b9ce58a2b5be7"
+
+[[package]]
+name = "glam"
+version = "0.32.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f70749695b063ecbf6b62949ccccde2e733ec3ecbbd71d467dca4e5c6c97cca0"
+
+[[package]]
+name = "glam"
+version = "0.33.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37bfe73dc8ec21f54d181e5a60554327ec3f1c600c455a75ccbfc65d2106a6c4"
+
+[[package]]
+name = "glam"
+version = "0.34.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "627003914c6057c9c8f0832ee4f870b5a4f599d0cfa83f4072675114860cd0ff"
+
+[[package]]
 name = "glib"
 version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7397,7 +7684,7 @@ dependencies = [
  "log",
  "lyon",
  "num_cpus",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-video",
  "objc2-metal 0.3.2",
@@ -7465,7 +7752,7 @@ dependencies = [
  "libc",
  "log",
  "mach2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-text",
@@ -7492,7 +7779,7 @@ dependencies = [
  "gpui_apple",
  "gpui_platform",
  "log",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -7568,7 +7855,7 @@ dependencies = [
  "image",
  "itertools 0.14.0",
  "log",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-core-graphics",
  "objc2-core-media",
@@ -8285,6 +8572,77 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "hud_agents"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_registry",
+ "city_view",
+ "gpui",
+ "hud_kit",
+]
+
+[[package]]
+name = "hud_benchmarks"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_render",
+ "gpui",
+ "hud_kit",
+ "libc",
+]
+
+[[package]]
+name = "hud_breadcrumb"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_nav_model",
+ "city_view",
+ "gpui",
+ "hud_kit",
+]
+
+[[package]]
+name = "hud_kit"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "gpui",
+ "serde",
+]
+
+[[package]]
+name = "hud_map"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_nav_model",
+ "city_view",
+ "glam 0.34.3",
+ "gpui",
+ "hud_kit",
+]
+
+[[package]]
+name = "hud_view_settings"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_registry",
+ "city_settings",
+ "city_view",
+ "futures 0.3.34",
+ "gpui",
+ "hud_kit",
+]
+
+[[package]]
 name = "human_bytes"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8832,6 +9190,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "input_keys"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "gpui",
+]
+
+[[package]]
 name = "input_latency_ui"
 version = "0.1.0"
 dependencies = [
@@ -8842,6 +9209,30 @@ dependencies = [
  "serde_json",
  "sysinfo 0.39.6",
  "telemetry",
+]
+
+[[package]]
+name = "input_pointer"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_nav_model",
+ "city_registry",
+ "glam 0.34.3",
+ "gpui",
+]
+
+[[package]]
+name = "input_trackpad"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_core",
+ "city_nav_model",
+ "city_registry",
+ "glam 0.34.3",
+ "gpui",
 ]
 
 [[package]]
@@ -9441,6 +9832,97 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "884f3e747ed2dcee867cda1b0c31a048f9e20de2d916a248949319921a2e666e"
 
 [[package]]
+name = "lang_assets"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+ "imagesize",
+]
+
+[[package]]
+name = "lang_git"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_ini"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_json"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_markdown"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_rust"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_text"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_toml"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_xml"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
+name = "lang_yaml"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_lang",
+ "city_model",
+]
+
+[[package]]
 name = "language"
 version = "0.1.0"
 dependencies = [
@@ -9519,7 +10001,7 @@ dependencies = [
  "gpui_shared_string",
  "gpui_util",
  "log",
- "lru",
+ "lru 0.16.4",
  "parking_lot",
  "path",
  "regex",
@@ -9848,6 +10330,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
+name = "lens_edit_tool"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_registry",
+ "gpui",
+]
+
+[[package]]
+name = "lens_live_edits"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_registry",
+ "gpui",
+]
+
+[[package]]
+name = "lens_presence"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_registry",
+ "gpui",
+]
+
+[[package]]
+name = "lens_under_work"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_host",
+ "city_registry",
+ "fnv",
+ "gpui",
+]
+
+[[package]]
 name = "libbz2-rs-sys"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9855,9 +10378,9 @@ checksum = "2c4a545a15244c7d945065b5d392b2d2d7f21526fba56ce51467b06ed445e8f7"
 
 [[package]]
 name = "libc"
-version = "0.2.186"
+version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "libdbus-sys"
@@ -10355,6 +10878,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9f71e3591c7ec44d3e563e87bf14ddc2bada8519dca046e5b0e560cd004e2d"
+dependencies = [
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10516,7 +11048,7 @@ checksum = "fd604973958ddcc11b561193c0fb96ba146506ef2f231ef2e7c35fd2cbc9beca"
 dependencies = [
  "cc",
  "log",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "time",
  "uuid",
@@ -10657,6 +11189,16 @@ name = "matchit"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
+
+[[package]]
+name = "matrixmultiply"
+version = "0.3.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f607c237553f086e7043417a51df26b2eb899d3caff94e6a67592ff992fedc7"
+dependencies = [
+ "autocfg",
+ "rawpointer",
+]
 
 [[package]]
 name = "maybe-owned"
@@ -11167,6 +11709,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nalgebra"
+version = "0.35.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc43a60c217b0c6ff46e47f26911015ad8d2e5a8be1af668c67e370d99a4346"
+dependencies = [
+ "approx",
+ "glam 0.30.10",
+ "glam 0.31.1",
+ "glam 0.32.1",
+ "glam 0.33.12",
+ "matrixmultiply",
+ "num-complex",
+ "num-rational",
+ "num-traits",
+ "simba",
+ "typenum",
+]
+
+[[package]]
 name = "nanoid"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11190,6 +11751,17 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nav_step"
+version = "0.1.0"
+source = "git+https://github.com/HubDev-AI/eof?rev=2e0ed9c338fc735364db397e41d09aec437c468f#2e0ed9c338fc735364db397e41d09aec437c468f"
+dependencies = [
+ "city_nav_model",
+ "city_registry",
+ "glam 0.34.3",
+ "gpui",
 ]
 
 [[package]]
@@ -11652,9 +12224,9 @@ dependencies = [
 
 [[package]]
 name = "objc2"
-version = "0.6.3"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7c2599ce0ec54857b29ce62166b0ed9b4f6f1a70ccc9a71165b6154caca8c05"
+checksum = "08849bbd4767dfae9457696856ae1c84fe4e0281bbe4a7abff2d0e06fb7981f8"
 dependencies = [
  "objc2-encode",
 ]
@@ -11683,7 +12255,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-uniform-type-identifiers",
@@ -11697,7 +12269,7 @@ checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
 dependencies = [
  "bitflags 2.13.1",
  "libc",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -11711,7 +12283,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
 
@@ -11722,7 +12294,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
 dependencies = [
  "dispatch2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -11735,7 +12307,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.3",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -11760,7 +12332,7 @@ dependencies = [
  "block2 0.6.2",
  "dispatch2",
  "libc",
- "objc2 0.6.3",
+ "objc2 0.6.5",
 ]
 
 [[package]]
@@ -11771,7 +12343,7 @@ checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
  "bitflags 2.13.1",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-io-surface",
 ]
@@ -11796,7 +12368,7 @@ checksum = "05ec576860167a15dd9fce7fbee7512beb4e31f532159d3482d1f9c6caedf31d"
 dependencies = [
  "bitflags 2.13.1",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -11830,7 +12402,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.3",
+ "block2 0.6.2",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-io-surface",
@@ -11864,7 +12437,7 @@ dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
  "libc",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
 ]
 
@@ -11885,7 +12458,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
 ]
 
@@ -11910,7 +12483,7 @@ dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
 ]
@@ -11935,7 +12508,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f"
 dependencies = [
  "bitflags 2.13.1",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -11950,7 +12523,7 @@ checksum = "74b7c5390f477482f001bc354d6571a70db7e4f8d5288e860c45521fbce11394"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-graphics",
  "objc2-core-media",
  "objc2-foundation 0.3.2",
@@ -11973,7 +12546,7 @@ checksum = "d87d638e33c06f577498cbcc50491496a3ed4246998a7fbba7ccb98b1e7eab22"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
@@ -11985,7 +12558,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7902ac02859fc1f7045f8b598c63f1ae0cc7efeaa06a9bc9f3d9a3c955974fa4"
 dependencies = [
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
 
@@ -11997,7 +12570,7 @@ checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
  "bitflags 2.13.1",
  "block2 0.6.2",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
 ]
 
@@ -14700,11 +15273,17 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40d213455a5f1dc59214213c7330e074ddf8114c9a42411eb890c767357ce135"
 dependencies = [
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
 ]
+
+[[package]]
+name = "rawpointer"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
 
 [[package]]
 name = "rayon"
@@ -15712,6 +16291,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da0ba8adb63e0deebd0744d8fc5bea394c08029159deaf680513fec1a3949144"
 
 [[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16156,10 +16744,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash 0.2.0",
  "indexmap 2.14.0",
  "itoa",
  "memchr",
@@ -16214,9 +16803,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "1.0.3"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e24345aa0fe688594e73770a5f6d1b216508b4f93484c0026d521acd30134392"
+checksum = "9c187e0a369471c550af028cba56d4f4fa2a489ad28151ae95a4d340a2a8b782"
 dependencies = [
  "serde_core",
 ]
@@ -16650,6 +17239,18 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest",
  "rand_core 0.6.4",
+]
+
+[[package]]
+name = "simba"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1a7200d82ff1c7b4235efd12f11e2537a402c91cf83a5cb97ce80eef787fde7"
+dependencies = [
+ "approx",
+ "num-complex",
+ "num-traits",
+ "wide",
 ]
 
 [[package]]
@@ -18540,11 +19141,26 @@ checksum = "f0dc8b1fb61449e27716ec0e1bdf0f6b8f3e8f6b05391e8497b8b6d7804ea6d8"
 dependencies = [
  "indexmap 2.14.0",
  "serde_core",
- "serde_spanned 1.0.3",
+ "serde_spanned 1.1.3",
  "toml_datetime 0.7.3",
  "toml_parser",
  "toml_writer",
  "winnow 0.7.13",
+]
+
+[[package]]
+name = "toml"
+version = "1.2.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5755c51863cdac711f1956baf8eb9588e060755f7d3c4c979e70ea1e1f32cd7"
+dependencies = [
+ "indexmap 2.14.0",
+ "serde_core",
+ "serde_spanned 1.1.3",
+ "toml_datetime 1.1.3+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 1.0.2",
 ]
 
 [[package]]
@@ -18561,6 +19177,15 @@ name = "toml_datetime"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "1.1.3+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "173f25c883cd2176a2d8212155638c0a60d484a9d84546d270866f40f56b6e49"
 dependencies = [
  "serde_core",
 ]
@@ -18593,11 +19218,11 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.0.4"
+version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
+checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
- "winnow 0.7.13",
+ "winnow 1.0.2",
 ]
 
 [[package]]
@@ -18608,9 +19233,9 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "toml_writer"
-version = "1.0.4"
+version = "1.2.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df8b2b54733674ad286d16267dcfc7a71ed5c776e4ac7aa3c3e2561f7c637bf2"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "toolchain_selector"
@@ -18836,7 +19461,7 @@ dependencies = [
  "chrono",
  "libc",
  "log",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "once_cell",
  "percent-encoding",
@@ -20639,7 +21264,7 @@ dependencies = [
  "naga",
  "naga-types",
  "ndk-sys",
- "objc2 0.6.3",
+ "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
@@ -20737,6 +21362,16 @@ checksum = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d"
 dependencies = [
  "libredox",
  "wasite",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]
@@ -22181,7 +22816,7 @@ dependencies = [
  "anyhow",
  "backtrace",
  "cargo_metadata",
- "cargo_toml",
+ "cargo_toml 0.21.0",
  "clap",
  "compliance",
  "gh-workflow",
@@ -22427,6 +23062,7 @@ dependencies = [
  "call_hierarchy",
  "channel",
  "chrono",
+ "city_zed",
  "clap",
  "cli",
  "client",

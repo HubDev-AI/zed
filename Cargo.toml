@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/city_zed",
     "crates/acp_thread",
     "crates/acp_tools",
     "crates/action_log",
@@ -279,6 +280,7 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
+city_zed = { path = "crates/city_zed" }
 
 #
 # Workspace member crates
@@ -1212,3 +1214,7 @@ nonminimal_bool = "allow"
 # this workspace on purpose.
 [workspace.metadata.dylint]
 libraries = [{ path = "tooling/lints" }]
+
+[patch."https://github.com/zed-industries/zed"]
+gpui = { path = "crates/gpui" }
+gpui_wgpu = { path = "crates/gpui_wgpu" }

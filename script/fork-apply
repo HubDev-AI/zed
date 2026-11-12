@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+
+# Registers the `city_zed` crate in this Zed checkout. Every edit is skipped when it is already
+# there, so the script can run again on a new upstream tag. Removing the city takes the
+# `city_zed::init` line, the `CityView` keymap block and the `city` namespace in Zed's action test:
+# without the init line the city's actions leave the binary, Zed rejects a bundled keymap that names
+# unknown actions, and the test compares the namespaces the binary registers with its list.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+ROOT_MANIFEST=Cargo.toml
+ZED_MANIFEST=crates/zed/Cargo.toml
+ZED_MAIN=crates/zed/src/main.rs
+ZED_TESTS=crates/zed/src/zed.rs
+KEYMAP=assets/keymaps/default-macos.json
+INIT_ANCHOR='go_to_line::init(cx);'
+ZED_GIT='https://github.com/zed-industries/zed'
+MAX_LOCK_UNLOCKS=20
+
+fail() {
+    echo "fork-apply: $*" >&2
+    exit 1
+}
+
+[[ -f crates/city_zed/Cargo.toml ]] ||
+    fail "crates/city_zed is missing; bring it across from the fork branch before running this"
+
+# Inserts `$2` on the line after the first line equal to `$3` in file `$1`.
+insert_after() {
+    local file=$1 text=$2 anchor=$3
+    grep -qxF -- "$anchor" "$file" || fail "$file: no line '$anchor'"
+    ANCHOR="$anchor" TEXT="$text" perl -0pi -e 's/^\Q$ENV{ANCHOR}\E\n/$&$ENV{TEXT}\n/m' "$file"
+}
+
+grep -qF '"crates/city_zed",' "$ROOT_MANIFEST" ||
+    insert_after "$ROOT_MANIFEST" '    "crates/city_zed",' 'members = ['
+
+grep -qF 'city_zed = { path = "crates/city_zed" }' "$ROOT_MANIFEST" ||
+    insert_after "$ROOT_MANIFEST" 'city_zed = { path = "crates/city_zed" }' '[workspace.dependencies]'
+
+# eof's crates name GPUI by git revision; these make them use this checkout's own crates.
+grep -qF "[patch.\"$ZED_GIT\"]" "$ROOT_MANIFEST" || cat >>"$ROOT_MANIFEST" <<EOF
+
+[patch."$ZED_GIT"]
+gpui = { path = "crates/gpui" }
+gpui_wgpu = { path = "crates/gpui_wgpu" }
+EOF
+
+grep -qxF 'city_zed.workspace = true' "$ZED_MANIFEST" ||
+    insert_after "$ZED_MANIFEST" 'city_zed.workspace = true' '[dependencies]'
+
+if ! grep -qF 'city_zed::init(cx);' "$ZED_MAIN"; then
+    anchor_line=$(grep -F -- "$INIT_ANCHOR" "$ZED_MAIN" | head -n 1) ||
+        fail "$ZED_MAIN: no line with '$INIT_ANCHOR'"
+    indent=${anchor_line%%[! ]*}
+    insert_after "$ZED_MAIN" "${indent}city_zed::init(cx);" "$anchor_line"
+fi
+
+grep -qxF '                "city",' "$ZED_TESTS" ||
+    insert_after "$ZED_TESTS" '                "city",' '            let expected_namespaces = vec!['
+
+if ! grep -qF '"context": "CityView"' "$KEYMAP"; then
+    tail -n 1 "$KEYMAP" | grep -qx ']' || fail "$KEYMAP: does not end with ']'"
+    sed -i.bak '$d' "$KEYMAP"
+    rm "$KEYMAP.bak"
+    cat >>"$KEYMAP" <<'EOF'
+  {
+    "context": "CityView",
+    "bindings": {
+      "escape": "city::Back",
+      "b": "city::Back",
+      "backspace": "city::Back",
+      "-": "city::Back",
+      "h": "city::Home",
+      "home": "city::Home",
+      "=": "city::StepIn",
+      "+": "city::StepIn",
+      "tab": "city::CycleTarget",
+      "left": "city::PanLeft",
+      "right": "city::PanRight",
+      "up": "city::PanUp",
+      "down": "city::PanDown",
+      "pageup": "city::PageUp",
+      "pagedown": "city::PageDown",
+      "space": "city::ReadOrPageDown",
+      "f": "city::Read",
+      "enter": "city::Read",
+    },
+  },
+]
+EOF
+fi
+
+# eof asks for newer patch or minor releases of some crates than Zed's lockfile holds. Each
+# conflict cargo reports unlocks that one crate at its locked version, and nothing else moves.
+unlock=()
+for _ in $(seq "$MAX_LOCK_UNLOCKS"); do
+    if [[ ${#unlock[@]} -eq 0 ]]; then
+        resolve=(cargo metadata --format-version 1)
+    else
+        resolve=(cargo update "${unlock[@]}")
+    fi
+    if output=$("${resolve[@]}" 2>&1 >/dev/null); then
+        echo "$output" | grep -E '^ +(Updating|Adding|Removing|Locking) ' || true
+        exit 0
+    fi
+    name=$(echo "$output" | sed -n 's/^error: failed to select a version for `\([^`]*\)`.*/\1/p' | head -n 1)
+    version=$(echo "$output" | sed -n "s/.*previously selected package \`$name v\([^\`]*\)\`.*/\1/p" | head -n 1)
+    if [[ -z "$name" || -z "$version" ]]; then
+        echo "$output" >&2
+        fail "cargo update failed for a reason other than a locked version"
+    fi
+    unlock+=(-p "$name@$version")
+done
+fail "more than $MAX_LOCK_UNLOCKS locked crates conflict with eof's requirements"

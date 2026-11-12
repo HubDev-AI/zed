@@ -64,6 +64,7 @@ path = "src/visual_test_runner.rs"
 required-features = ["visual-tests"]
 
 [dependencies]
+city_zed.workspace = true
 acp_thread.workspace = true
 acp_tools.workspace = true
 action_log = { workspace = true, optional = true }
