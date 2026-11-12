@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::{any::Any, sync::Arc, time::Instant};
 
 use agent_ui::AgentPanel;
 use city_shell::{CityShell, Source};
@@ -70,6 +70,9 @@ pub struct CityItem {
     focus: FocusHandle,
     state: State,
     _open: Task<()>,
+    /// The feed and agent follower, held here rather than by eof's change loop, which would keep
+    /// them until a change arrived after the tab closed.
+    _keep_alive: Box<dyn Any>,
 }
 
 impl CityItem {
@@ -83,11 +86,13 @@ impl CityItem {
             focus: cx.focus_handle(),
             state: State::Loading,
             _open: Task::ready(()),
+            _keep_alive: Box::new(()),
         };
-        let Some(source) = city_source(project, agents, cx) else {
+        let Some(mut source) = city_source(project, agents, cx) else {
             item.state = State::Failed("Open a local folder to see it as a city.".into());
             return item;
         };
+        item._keep_alive = std::mem::replace(&mut source.keep_alive, Box::new(()));
         let started = Instant::now();
         let root = source.root.clone();
         let text_system = Arc::new(gpui_apple::AppleTextSystem::new());
@@ -180,16 +185,19 @@ impl Render for CityItem {
 #[cfg(test)]
 mod tests {
     use std::{
+        any::Any,
         fs,
         path::Path,
         time::{Duration, Instant},
     };
 
-    use gpui::{Entity, Focusable as _, TestAppContext, VisualTestContext};
+    use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
     use settings::SettingsStore;
+    use workspace::MultiWorkspace;
 
     use super::CityItem;
+    use crate::zed_agents::ZedAgents;
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
     const WATCHED_POLL: Duration = Duration::from_millis(50);
@@ -280,6 +288,43 @@ mod tests {
         wait_for(1, &item, cx);
         fs::remove_file(root.join("notes.md")).unwrap();
         wait_for(0, &item, cx);
+    }
+
+    // Eof's change loop would hold the feed and the agent follower, with its heartbeat, until a
+    // change arrived after the tab closed; in a quiet folder that is never, so the tab holds them.
+    #[gpui::test]
+    async fn closing_the_tab_ends_its_agent_follower(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        agent_ui::test_support::init_test(cx);
+        cx.update(|cx| city_shell::init(test_settings(), cx));
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        put(&root, "notes.md", "# Notes\n");
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        let item = workspace.update_in(cx, |_, window, cx| {
+            let agents = (cx.entity(), None);
+            cx.new(|cx| CityItem::new(&project, Some(agents), window, cx))
+        });
+        wait_for(1, &item, cx);
+        let follower = item
+            .read_with(cx, |item, _| {
+                item._keep_alive
+                    .downcast_ref::<(Box<dyn Any>, Entity<ZedAgents>)>()
+                    .map(|(_, agents)| agents.downgrade())
+            })
+            .expect("the tab holds its agent follower");
+        drop(item);
+        // Releasing the item drops its last handle to the follower, which GPUI releases on the
+        // next flush of effects.
+        cx.update(|_, _| {});
+        cx.run_until_parked();
+        assert!(follower.upgrade().is_none());
     }
 
     // Off-screen open-to-ready time of the tab, on this checkout and on a small folder, for a first
