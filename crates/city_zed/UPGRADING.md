@@ -49,6 +49,7 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | `Buffer::file`, `is_dirty`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:373`, `:395` |
 | `text::BufferSnapshot::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
 | `RelPath::as_unix_str` | `crates/path/src/rel_path.rs:268` |
+| The default `file_scan_exclusions`: eof's `city_host::UNSHOWN` copies them, so a change there makes the standalone app list different files | `assets/settings/default.json:1788` |
 | `Project::fs`; `Fs::open_sync` (the reader blocks on it, so it must not hop onto the background executor), `ReadSeek` | `project.rs:2396`; `fs.rs:137`, `:79` |
 
 ## Settings (`zed_settings.rs`)
@@ -90,5 +91,5 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | `agent_ui::test_support::{init_test, open_thread_with_connection}`, `AgentPanel::test_new`, `active_agent_thread`, `ThreadMetadataStore::init_global` (`agent_ui` `test-support`) | `crates/agent_ui/src/test_support.rs:106`, `:228`, `crates/agent_ui/src/agent_panel.rs:6729`, `:4158`, `crates/agent_ui/src/thread_metadata_store.rs:554` |
 | `agent::ThreadStore::init_global`, `LanguageModelRegistry::test` (`language_model` `test-support`) | `crates/agent/src/thread_store.rs:18`, `crates/language_model/src/registry.rs:136` |
 | `MultiWorkspace::test_new`, `workspace`; `Workspace::add_panel` | `crates/workspace/src/multi_workspace.rs:1642`, `:1304`; `workspace.rs:2837` |
-| `file_scan_inclusions` | `crates/settings_content/src/project.rs:192` |
+| `file_scan_inclusions`, `file_scan_exclusions`, `SplicingVec::REST` | `crates/settings_content/src/project.rs:192`, `:166`, `settings_content.rs:1585` |
 | `remote_connection` (`test-support`): no test calls it, but the test build turns on `remote`'s `Mock` connection, which `remote_connection` matches only with its own `test-support` | `crates/remote_connection/src/remote_connection.rs:256` |

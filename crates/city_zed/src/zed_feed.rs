@@ -60,10 +60,14 @@ pub(crate) fn source(
     })
 }
 
-/// A file the city shows: what Zed's own file traversal lists, less named pipes, which block the
-/// reader that opens them.
+/// A file the city shows: what Zed's own file traversal lists and eof's shared listing rule keeps,
+/// less named pipes, which block the reader that opens them. The shared rule keeps the standalone
+/// app's city when the user takes names out of Zed's `file_scan_exclusions`.
 fn shown(entry: &Entry) -> bool {
-    entry.is_file() && !entry.is_fifo && (!entry.is_ignored || entry.is_always_included)
+    entry.is_file()
+        && !entry.is_fifo
+        && (!entry.is_ignored || entry.is_always_included)
+        && city_host::shown(entry.path.as_unix_str())
 }
 
 /// Saved contents of the folder's files, read through Zed's `Fs`.
@@ -732,6 +736,108 @@ mod tests {
             cx.run_until_parked();
             std::thread::sleep(POLL);
         }
+    }
+
+    /// The fixture of eof's `the_listing_shows_dotfiles_and_drops_version_control_and_ignored_files`
+    /// test in `host_standalone`, which pins the standalone app's listing of it.
+    const REPOSITORY: [(&str, &str); 24] = [
+        (".gitignore", "target/\n*.log\n"),
+        (".ignore", "docs/\n"),
+        (".github/workflows/ci.yml", "on: push\n"),
+        (".cargo/config.toml", "[build]\n"),
+        (".editorconfig", "root = true\n"),
+        ("docs/readme.md", "x"),
+        ("src/main.rs", "fn main() {}\n"),
+        ("target/debug/app", "x"),
+        ("run.log", "x"),
+        (".git/HEAD", "ref: refs/heads/main\n"),
+        (".git/info/exclude", ".eof-local-only/\n"),
+        (".eof-local-only/notes.md", "x"),
+        (".hg/store/data", "x"),
+        (".svn/entries", "x"),
+        ("src/.jj/repo", "x"),
+        (".sl/store", "x"),
+        (".repo/manifest.xml", "x"),
+        ("src/CVS/Root", "x"),
+        ("src/.DS_Store", "x"),
+        ("src/Thumbs.db", "x"),
+        (".classpath", "x"),
+        (".settings/eclipse.prefs", "x"),
+        ("vendor/lib/.git/HEAD", "x"),
+        ("vendor/lib/lib.rs", "x"),
+    ];
+
+    /// What the standalone app lists for `REPOSITORY`.
+    const STANDALONE_LISTING: [&str; 8] = [
+        ".cargo/config.toml",
+        ".editorconfig",
+        ".github/workflows/ci.yml",
+        ".gitignore",
+        ".ignore",
+        "docs/readme.md",
+        "src/main.rs",
+        "vendor/lib/lib.rs",
+    ];
+
+    /// The Zed tab's sorted listing of `REPOSITORY`, with the user's `file_scan_exclusions` when
+    /// given and Zed's defaults otherwise.
+    async fn zed_listing(exclusions: Option<&[&str]>, cx: &mut TestAppContext) -> Vec<String> {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        if let Some(exclusions) = exclusions {
+            let exclusions: Vec<String> = exclusions.iter().map(|glob| glob.to_string()).collect();
+            cx.update(|cx| {
+                gpui::BorrowAppContext::update_global::<SettingsStore, _>(cx, |store, cx| {
+                    store.update_user_settings(cx, |settings| {
+                        settings.project.worktree.file_scan_exclusions =
+                            Some(settings::SplicingVec::from(exclusions));
+                    });
+                });
+            });
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        for (path, text) in REPOSITORY {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        }
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        settled_project(cx);
+        let mut listing = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap().listing
+        });
+        listing.sort();
+        listing
+    }
+
+    // Both versions of eof draw the same city for one repository: dotfiles are shown, while
+    // version control folders at any depth, OS clutter and what git ignores are not.
+    #[gpui::test]
+    async fn zed_lists_what_the_standalone_app_lists(cx: &mut TestAppContext) {
+        assert_eq!(zed_listing(None, cx).await, STANDALONE_LISTING);
+    }
+
+    // Zed then scans the version control folders and OS clutter, but the city still leaves them out.
+    #[gpui::test]
+    async fn names_taken_out_of_zeds_exclusions_stay_out_of_the_city(cx: &mut TestAppContext) {
+        assert_eq!(zed_listing(Some(&[]), cx).await, STANDALONE_LISTING);
+    }
+
+    // Zed never scans what the user adds, so the Zed city leaves it out while the standalone app,
+    // which does not read Zed's settings, still lists it.
+    #[gpui::test]
+    async fn names_added_to_zeds_exclusions_leave_only_the_zed_city(cx: &mut TestAppContext) {
+        let listing = zed_listing(Some(&["**/docs", settings::SplicingVec::REST]), cx).await;
+        let expected: Vec<&str> = STANDALONE_LISTING
+            .into_iter()
+            .filter(|path| *path != "docs/readme.md")
+            .collect();
+        assert_eq!(listing, expected);
     }
 
     // The city drops held text for a path it no longer shows, so a file renamed under unsaved
