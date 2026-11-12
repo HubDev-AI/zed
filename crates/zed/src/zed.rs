@@ -6202,6 +6202,7 @@ mod tests {
             assert_eq!(actions_without_namespace, Vec::<&str>::new());
 
             let expected_namespaces = vec![
+                "city",
                 "action",
                 "activity_indicator",
                 "agent",
