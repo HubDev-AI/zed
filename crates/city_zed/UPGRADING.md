@@ -41,7 +41,7 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 |---|---|
 | `Project::is_local`, `visible_worktrees`, `worktree_for_id`, `opened_buffers`, `buffer_store` | `crates/project/src/project.rs:3152`, `:2522`, `:2585`, `:2360`, `:6767` |
 | `project::Event::WorktreeUpdatedEntries`, `UpdatedEntriesSet` | `project.rs:384`, `crates/worktree/src/worktree.rs:4068` |
-| `Worktree::snapshot`; `Snapshot::id`, `abs_path`, `files`, `entry_for_path` | `worktree.rs:823`, `:2554`, `:2570`, `:2835`, `:2907` |
+| `Worktree::snapshot`, `is_single_file`; `Snapshot::id`, `abs_path`, `files`, `entry_for_path` | `worktree.rs:823`, `:1275`, `:2554`, `:2570`, `:2835`, `:2907` |
 | `Entry { id, is_ignored, is_always_included, is_fifo }`, `is_file` | `worktree.rs:3987`, `:4196` |
 | `BufferStoreEvent::BufferAdded` | `crates/project/src/buffer_store.rs:92` |
 | `BufferEvent::{Edited { source }, DirtyChanged, Saved, FileHandleChanged, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |

@@ -21,7 +21,8 @@ use project::{
 };
 use util::ResultExt as _;
 
-/// The first visible folder of a local project as a city source, or `None` when there is none.
+/// The first visible folder of a local project as a city source, or `None` when there is none,
+/// as in a window opened on a single file.
 /// The snapshot may still be filling at startup; the files it lacks arrive as entry updates,
 /// which the feed takes from the same point on.
 pub(crate) fn source(
@@ -34,6 +35,9 @@ pub(crate) fn source(
         return None;
     }
     let worktree = project.read(cx).visible_worktrees(cx).next()?;
+    if worktree.read(cx).is_single_file() {
+        return None;
+    }
     let snapshot = worktree.read(cx).snapshot();
     let root = snapshot.abs_path().to_path_buf();
     let listing: Vec<String> = snapshot
@@ -930,5 +934,19 @@ mod tests {
         sent.extend(settled(&mut source.changes, cx));
         assert_eq!(buffer.read_with(cx, |buffer, _| buffer.is_dirty()), false);
         assert!(sent.contains(&dropped("main.rs")), "{sent:?}");
+    }
+
+    // A window opened on one file has no folder to show; its city says so rather than showing an
+    // empty city.
+    #[gpui::test]
+    async fn a_window_on_a_single_file_has_no_city(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let file = rig.root.join("main.rs");
+        let project = Project::test(RealFs::new(None, cx.executor()), [file.as_path()], cx).await;
+        let source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx)
+        });
+        assert!(source.is_none());
     }
 }
