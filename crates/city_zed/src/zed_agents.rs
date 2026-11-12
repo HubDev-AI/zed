@@ -8,7 +8,9 @@ use std::{
     time::Duration,
 };
 
-use acp_thread::{AcpThread, AcpThreadEvent, AgentThreadEntry, ThreadStatus, ToolCallStatus};
+use acp_thread::{
+    AcpThread, AcpThreadEvent, AgentThreadEntry, ForegroundActivity, ThreadStatus, ToolCallStatus,
+};
 use agent_client_protocol::v2::schema as acp;
 use agent_ui::{AgentPanel, ConversationView};
 use city_host::{
@@ -153,15 +155,13 @@ impl ZedAgents {
                 _subscriptions: [events, released],
             },
         );
-        match thread.read(cx).status() {
-            ThreadStatus::Generating => {
-                self.set_state(key, &thread, ThreadState::Working, cx);
+        if let Some(state) = current_state(thread.read(cx)) {
+            self.set_state(key, &thread, state, cx);
+            if state.live() {
                 for index in 0..thread.read(cx).entries().len() {
                     self.entry_changed(key, &thread, index, true, cx);
                 }
             }
-            ThreadStatus::Unconfirmed => self.set_state(key, &thread, ThreadState::Unknown, cx),
-            ThreadStatus::Idle => {}
         }
         let subagents: Vec<Entity<AcpThread>> = thread.read(cx).subagents().cloned().collect();
         for subagent in subagents {
@@ -177,14 +177,7 @@ impl ZedAgents {
         cx: &mut Context<Self>,
     ) {
         match event {
-            AcpThreadEvent::StatusChanged => {
-                let state = match thread.read(cx).status() {
-                    ThreadStatus::Generating => ThreadState::Working,
-                    ThreadStatus::Idle => ThreadState::Idle,
-                    ThreadStatus::Unconfirmed => ThreadState::Unknown,
-                };
-                self.set_state(key, thread, state, cx);
-            }
+            AcpThreadEvent::StatusChanged => self.state_changed(key, thread, cx),
             AcpThreadEvent::NewEntry => {
                 if let Some(index) = thread.read(cx).entries().len().checked_sub(1) {
                     self.entry_changed(key, thread, index, false, cx);
@@ -193,12 +186,9 @@ impl ZedAgents {
             AcpThreadEvent::EntryUpdated(index) => {
                 self.entry_changed(key, thread, *index, false, cx)
             }
-            AcpThreadEvent::ToolAuthorizationRequested(_) => {
-                self.set_state(key, thread, ThreadState::WaitingForPermission, cx);
-                self.calls_changed(key, thread, cx);
-            }
-            AcpThreadEvent::ToolAuthorizationReceived(_) => {
-                self.set_state(key, thread, ThreadState::Working, cx);
+            AcpThreadEvent::ToolAuthorizationRequested(_)
+            | AcpThreadEvent::ToolAuthorizationReceived(_) => {
+                self.state_changed(key, thread, cx);
                 self.calls_changed(key, thread, cx);
             }
             AcpThreadEvent::Stopped { stop_reason, .. } => {
@@ -226,6 +216,23 @@ impl ZedAgents {
             }
             _ => {}
         }
+    }
+
+    fn state_changed(&mut self, key: EntityId, thread: &Entity<AcpThread>, cx: &Context<Self>) {
+        let state = match current_state(thread.read(cx)) {
+            Some(state) => state,
+            // Some agents report why a turn ended before Zed reports it idle; the reason stays.
+            None if self
+                .threads
+                .get(&key)
+                .and_then(|followed| followed.state)
+                .is_some_and(ThreadState::ended) =>
+            {
+                return;
+            }
+            None => ThreadState::Idle,
+        };
+        self.set_state(key, thread, state, cx);
     }
 
     /// Sends every tool call of the thread whose state the city has not seen yet.
@@ -359,6 +366,16 @@ impl ZedAgents {
 fn root_thread(view: &Entity<ConversationView>, cx: &gpui::App) -> Option<Entity<AcpThread>> {
     let thread_view = view.read(cx).root_thread_view()?;
     Some(thread_view.read(cx).thread.clone())
+}
+
+/// The state Zed itself shows for the thread's turn, or `None` when it has none.
+fn current_state(thread: &AcpThread) -> Option<ThreadState> {
+    match thread.foreground_activity() {
+        ForegroundActivity::Running => Some(ThreadState::Working),
+        ForegroundActivity::RequiresAction => Some(ThreadState::WaitingForPermission),
+        ForegroundActivity::Unconfirmed | ForegroundActivity::Unknown => Some(ThreadState::Unknown),
+        ForegroundActivity::Idle => None,
+    }
 }
 
 /// The state a turn ends in for the reason the agent gave.
@@ -843,5 +860,228 @@ mod tests {
     #[test]
     fn a_paused_call_still_claims_its_files() {
         assert!(tool_status(ToolCallStatus::Paused).open());
+    }
+
+    fn request_permission(
+        thread: &Entity<AcpThread>,
+        cx: &mut TestAppContext,
+    ) -> (
+        acp_thread::PermissionRequestId,
+        gpui::Task<super::acp::RequestPermissionOutcome>,
+    ) {
+        thread.update(cx, |thread, cx| {
+            let request = super::acp::RequestPermissionRequest::new(
+                thread.session_id().clone(),
+                "Approve operation",
+                vec![super::acp::PermissionOption::new(
+                    "allow",
+                    "Allow",
+                    super::acp::PermissionOptionKind::AllowOnce,
+                )],
+            );
+            thread.request_permission(request, cx).unwrap()
+        })
+    }
+
+    fn last_state(signals: &[AgentSignal]) -> Option<ThreadState> {
+        signals.iter().rev().find_map(|signal| match signal {
+            AgentSignal::Thread { state, .. } => Some(*state),
+            _ => None,
+        })
+    }
+
+    #[gpui::test]
+    async fn a_permission_request_shows_waiting_until_answered(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["wait".into()], cx));
+        cx.run_until_parked();
+        rig.signals(cx);
+        let (permission, response) = request_permission(&thread, cx);
+        let signals = unnamed(rig.signals(cx));
+        assert!(thread.read_with(cx, |thread, _| thread.is_waiting_for_confirmation()));
+        thread.update(cx, |thread, cx| {
+            thread.cancel_permission_request(permission, cx)
+        });
+        response.await;
+        let after = unnamed(rig.signals(cx));
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        let ended = unnamed(rig.signals(cx));
+        assert_eq!(last_state(&ended), Some(ThreadState::Idle), "{ended:?}");
+        assert_eq!(last_state(&after), Some(ThreadState::Working), "{after:?}");
+        assert_eq!(
+            last_state(&signals),
+            Some(ThreadState::WaitingForPermission),
+            "{signals:?}"
+        );
+    }
+
+    #[gpui::test]
+    async fn answering_one_of_two_permission_requests_keeps_waiting(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["wait".into()], cx));
+        cx.run_until_parked();
+        let (first, first_response) = request_permission(&thread, cx);
+        let (second, second_response) = request_permission(&thread, cx);
+        rig.signals(cx);
+        thread.update(cx, |thread, cx| thread.cancel_permission_request(first, cx));
+        first_response.await;
+        let signals = unnamed(rig.signals(cx));
+        thread.update(cx, |thread, cx| {
+            thread.cancel_permission_request(second, cx)
+        });
+        second_response.await;
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        assert!(
+            !signals.contains(&state(
+                &thread.read_with(cx, |thread, _| ThreadId(thread.session_id().to_string())),
+                ThreadState::Working
+            )),
+            "{signals:?}"
+        );
+    }
+
+    #[gpui::test]
+    async fn a_thread_followed_while_waiting_for_permission_shows_waiting(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = cx
+            .update(|cx| {
+                rig.connection.clone().new_session(
+                    rig.project.clone(),
+                    PathList::new(&[rig.root.as_path()]),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["wait".into()], cx));
+        cx.run_until_parked();
+        let (permission, response) = request_permission(&thread, cx);
+        cx.run_until_parked();
+        rig.agents
+            .update(cx, |agents, cx| agents.track(thread.clone(), cx));
+        let signals = unnamed(rig.signals(cx));
+        thread.update(cx, |thread, cx| {
+            thread.cancel_permission_request(permission, cx)
+        });
+        response.await;
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        assert_eq!(
+            last_state(&signals),
+            Some(ThreadState::WaitingForPermission),
+            "{signals:?}"
+        );
+    }
+
+    fn reported(
+        thread: &Entity<AcpThread>,
+        update: super::acp::StateUpdate,
+        cx: &mut TestAppContext,
+    ) {
+        thread
+            .update(cx, |thread, cx| thread.update_session_state(update, cx))
+            .unwrap();
+        cx.run_until_parked();
+    }
+
+    fn running() -> super::acp::StateUpdate {
+        super::acp::StateUpdate::Running(super::acp::RunningStateUpdate::new())
+    }
+
+    fn requires_action() -> super::acp::StateUpdate {
+        super::acp::StateUpdate::RequiresAction(super::acp::RequiresActionStateUpdate::new())
+    }
+
+    fn idle(reason: super::acp::StopReason) -> super::acp::StateUpdate {
+        super::acp::StateUpdate::Idle(super::acp::IdleStateUpdate::new().stop_reason(reason))
+    }
+
+    #[gpui::test]
+    async fn an_agent_reporting_it_needs_action_shows_waiting(cx: &mut TestAppContext) {
+        let mut rig = rig(
+            StubAgentConnection::new().with_receipt_submissions(true),
+            cx,
+        )
+        .await;
+        let thread = rig.thread(cx).await;
+        reported(&thread, running(), cx);
+        rig.signals(cx);
+        reported(&thread, requires_action(), cx);
+        let signals = unnamed(rig.signals(cx));
+        assert_eq!(
+            last_state(&signals),
+            Some(ThreadState::WaitingForPermission),
+            "{signals:?}"
+        );
+    }
+
+    #[gpui::test]
+    async fn a_thread_followed_after_it_reported_needing_action_shows_waiting(
+        cx: &mut TestAppContext,
+    ) {
+        let mut rig = rig(
+            StubAgentConnection::new().with_receipt_submissions(true),
+            cx,
+        )
+        .await;
+        let thread = cx
+            .update(|cx| {
+                rig.connection.clone().new_session(
+                    rig.project.clone(),
+                    PathList::new(&[rig.root.as_path()]),
+                    cx,
+                )
+            })
+            .await
+            .unwrap();
+        reported(&thread, running(), cx);
+        reported(&thread, requires_action(), cx);
+        rig.agents
+            .update(cx, |agents, cx| agents.track(thread.clone(), cx));
+        let signals = unnamed(rig.signals(cx));
+        assert_eq!(
+            last_state(&signals),
+            Some(ThreadState::WaitingForPermission),
+            "{signals:?}"
+        );
+    }
+
+    #[gpui::test]
+    async fn a_reported_turn_end_keeps_its_reason_until_the_next_turn(cx: &mut TestAppContext) {
+        let mut rig = rig(
+            StubAgentConnection::new().with_receipt_submissions(true),
+            cx,
+        )
+        .await;
+        let thread = rig.thread(cx).await;
+        let mut ends = Vec::new();
+        for (reason, expected) in [
+            (super::acp::StopReason::Cancelled, StopReason::Cancelled),
+            (super::acp::StopReason::MaxTokens, StopReason::MaxTokens),
+            (super::acp::StopReason::Refusal, StopReason::Refusal),
+        ] {
+            reported(&thread, running(), cx);
+            let started = unnamed(rig.signals(cx));
+            reported(&thread, idle(reason), cx);
+            let ended = unnamed(rig.signals(cx));
+            ends.push((last_state(&started), last_state(&ended), expected));
+        }
+        reported(&thread, running(), cx);
+        let started = unnamed(rig.signals(cx));
+        reported(&thread, idle(super::acp::StopReason::EndTurn), cx);
+        let ended = unnamed(rig.signals(cx));
+        assert_eq!(last_state(&started), Some(ThreadState::Working));
+        assert_eq!(last_state(&ended), Some(ThreadState::Idle));
+        for (started, ended, expected) in ends {
+            assert_eq!(started, Some(ThreadState::Working));
+            assert_eq!(ended, Some(ThreadState::Stopped { reason: expected }));
+        }
     }
 }
