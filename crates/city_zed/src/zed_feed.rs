@@ -17,8 +17,7 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription, Task};
 use language::{Buffer, BufferEditSource, BufferEvent};
 use project::{
-    Entry, MTime, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId,
-    buffer_store::BufferStoreEvent,
+    Entry, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId, buffer_store::BufferStoreEvent,
 };
 use util::ResultExt as _;
 
@@ -105,9 +104,6 @@ struct ZedFeed {
     shown: HashSet<String>,
     /// The path and version of the unsaved text each buffer has handed to the city.
     held: HashMap<EntityId, Held>,
-    /// Paths Zed just saved from a buffer, with the saved mtime: the worktree reports the same
-    /// write once more, and the city has already reread it.
-    saved: HashMap<String, Option<MTime>>,
     buffers: HashMap<EntityId, [Subscription; 2]>,
     /// Edits not yet handed to the city, waiting for typing to pause, with who made them.
     pending: HashMap<EntityId, (Option<HostAuthor>, Task<()>)>,
@@ -131,7 +127,6 @@ impl ZedFeed {
             worktree_id,
             shown,
             held: HashMap::default(),
-            saved: HashMap::default(),
             buffers: HashMap::default(),
             pending: HashMap::default(),
             sender,
@@ -173,31 +168,22 @@ impl ZedFeed {
             return;
         };
         let snapshot = worktree.read(cx).snapshot();
-        let files_now: HashMap<String, (ProjectEntryId, Option<MTime>)> = entries
+        let files_now: HashMap<String, ProjectEntryId> = entries
             .iter()
             .filter_map(|(path, _, _)| {
                 let entry = snapshot.entry_for_path(path)?;
-                shown(entry).then(|| (path.as_unix_str().to_string(), (entry.id, entry.mtime)))
+                shown(entry).then(|| (path.as_unix_str().to_string(), entry.id))
             })
             .collect();
         let batch = entries
             .iter()
             .map(|(path, entry_id, _)| (path.as_unix_str().to_string(), *entry_id));
-        let mut change = paths_changed(
-            batch,
-            |path| files_now.get(path).map(|(id, _)| *id),
-            &mut self.shown,
-        );
+        let mut change = paths_changed(batch, |path| files_now.get(path).copied(), &mut self.shown);
         // A held file shows its unsaved text, and the city rereads the disk when the text is
-        // dropped; Zed's save reports the write before or after `Saved`, so both orders end in
-        // that one reread.
+        // dropped; Zed writes a saved file before it reports `Saved`, so the worktree's report of
+        // that write arrives while the text is still held, and the save ends in one reread.
         let held: HashSet<&String> = self.held.values().map(|held| &held.path).collect();
-        change.modified.retain(|path| {
-            let saved = self.saved.remove(path);
-            !held.contains(path)
-                && saved
-                    .is_none_or(|saved| files_now.get(path).map(|(_, mtime)| *mtime) != Some(saved))
-        });
+        change.modified.retain(|path| !held.contains(path));
         if !change.is_empty() {
             self.send(HostChange::Paths {
                 change,
@@ -322,15 +308,13 @@ impl ZedFeed {
         }
     }
 
-    /// The city rereads a saved file from the buffer's side, so the worktree's report of the same
-    /// write is dropped whether or not the buffer's dirty bit cleared first.
+    /// The city rereads a saved file from the buffer's side.
     fn buffer_saved(&mut self, buffer: &Entity<Buffer>, cx: &App) {
         let id = buffer.entity_id();
         let buffer = buffer.read(cx);
         let Some(path) = self.path_in_worktree(buffer, cx) else {
             return;
         };
-        self.saved.insert(path.clone(), buffer.saved_mtime());
         let held = self.held.remove(&id);
         let author = held.as_ref().and_then(|held| held.author.clone());
         let stale = held.map(|held| held.path).filter(|old| *old != path);
