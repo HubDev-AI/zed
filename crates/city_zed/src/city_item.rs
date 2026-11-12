@@ -22,13 +22,19 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
+    let project = workspace.project().clone();
+    let agents = (cx.entity(), workspace.panel::<AgentPanel>(cx));
     let existing = workspace.items_of_type::<CityItem>(cx).next();
     if let Some(city) = existing {
+        city.update(cx, |city, cx| {
+            if matches!(city.state, State::Failed(_)) {
+                city.start(&project, Some(agents), window, cx);
+                cx.notify();
+            }
+        });
         workspace.activate_item(&city, true, true, window, cx);
         return;
     }
-    let project = workspace.project().clone();
-    let agents = (cx.entity(), workspace.panel::<AgentPanel>(cx));
     let city = cx.new(|cx| CityItem::new(&project, Some(agents), window, cx));
     workspace.add_item_to_active_pane(Box::new(city), None, true, window, cx);
 }
@@ -88,15 +94,28 @@ impl CityItem {
             _open: Task::ready(()),
             _keep_alive: Box::new(()),
         };
+        item.start(project, agents, window, cx);
+        item
+    }
+
+    /// Opens the city of the project's folder in this tab, or says why it cannot.
+    fn start(
+        &mut self,
+        project: &Entity<Project>,
+        agents: Option<AgentHost>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state = State::Loading;
         let Some(mut source) = city_source(project, agents, cx) else {
-            item.state = State::Failed("Open a local folder to see it as a city.".into());
-            return item;
+            self.state = State::Failed("Open a local folder to see it as a city.".into());
+            return;
         };
-        item._keep_alive = std::mem::replace(&mut source.keep_alive, Box::new(()));
+        self._keep_alive = std::mem::replace(&mut source.keep_alive, Box::new(()));
         let root = source.root.clone();
         let text_system = Arc::new(gpui_apple::AppleTextSystem::new());
         let opening = city_shell::open(source, text_system, cx);
-        item._open = cx.spawn_in(window, async move |this, cx| {
+        self._open = cx.spawn_in(window, async move |this, cx| {
             let opened = opening.await;
             this.update_in(cx, |this, window, cx| {
                 match opened {
@@ -116,7 +135,6 @@ impl CityItem {
             })
             .log_err();
         });
-        item
     }
 
     #[cfg(test)]
@@ -181,7 +199,7 @@ mod tests {
     use settings::SettingsStore;
     use workspace::MultiWorkspace;
 
-    use super::CityItem;
+    use super::{CityItem, State, open};
     use crate::zed_agents::ZedAgents;
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
@@ -309,5 +327,45 @@ mod tests {
         cx.update(|_, _| {});
         cx.run_until_parked();
         assert!(follower.upgrade().is_none());
+    }
+
+    // A tab that failed, such as one opened before the window had a folder, tries again when the
+    // city is opened again, rather than staying failed or stacking a second tab.
+    #[gpui::test]
+    async fn opening_the_city_again_retries_a_tab_that_failed(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        agent_ui::test_support::init_test(cx);
+        cx.update(|cx| city_shell::init(test_settings(), cx));
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        put(&root, "notes.md", "# Notes\n");
+        let project = Project::test(RealFs::new(None, cx.executor()), [], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+            .unwrap();
+        let cx = &mut VisualTestContext::from_window(window.into(), cx);
+        let cities = |cx: &mut VisualTestContext| {
+            workspace.read_with(cx, |workspace, cx| {
+                workspace
+                    .items_of_type::<CityItem>(cx)
+                    .map(|city| matches!(city.read(cx).state, State::Failed(_)))
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        workspace.update_in(cx, |workspace, window, cx| open(workspace, window, cx));
+        assert_eq!(cities(cx), [true]);
+        workspace.update_in(cx, |workspace, window, cx| open(workspace, window, cx));
+        assert_eq!(cities(cx), [true]);
+        project
+            .update(cx, |project, cx| {
+                project.find_or_create_worktree(&root, true, cx)
+            })
+            .await
+            .unwrap();
+        workspace.update_in(cx, |workspace, window, cx| open(workspace, window, cx));
+        assert_eq!(cities(cx), [false]);
     }
 }
