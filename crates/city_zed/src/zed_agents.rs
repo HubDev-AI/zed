@@ -9,7 +9,7 @@ use std::{
 };
 
 use acp_thread::{AcpThread, AcpThreadEvent, AgentThreadEntry, ThreadStatus, ToolCallStatus};
-use agent_client_protocol::schema::v2 as acp;
+use agent_client_protocol::v2::schema as acp;
 use agent_ui::{AgentPanel, ConversationView};
 use city_host::{
     AgentSignal, StopReason, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation, ToolStatus,
@@ -404,7 +404,7 @@ fn tool_status(status: ToolCallStatus) -> ToolStatus {
     match status {
         ToolCallStatus::Pending => ToolStatus::Pending,
         ToolCallStatus::WaitingForConfirmation => ToolStatus::WaitingForPermission,
-        ToolCallStatus::InProgress => ToolStatus::InProgress,
+        ToolCallStatus::InProgress | ToolCallStatus::Paused => ToolStatus::InProgress,
         ToolCallStatus::Completed => ToolStatus::Completed,
         ToolCallStatus::Failed => ToolStatus::Failed,
         ToolCallStatus::Rejected => ToolStatus::Rejected,
@@ -416,8 +416,8 @@ fn tool_status(status: ToolCallStatus) -> ToolStatus {
 mod tests {
     use std::{fs, path::Path, rc::Rc};
 
-    use acp_thread::{AcpThread, AgentConnection as _, StubAgentConnection};
-    use agent_client_protocol::schema::v1 as acp_v1;
+    use acp_thread::{AcpThread, AgentConnection as _, StubAgentConnection, ToolCallStatus};
+    use agent_client_protocol::v1::schema as acp_v1;
     use city_host::{
         AgentSignal, StopReason, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation,
         ToolStatus,
@@ -429,7 +429,7 @@ mod tests {
     use settings::SettingsStore;
     use util::path_list::PathList;
 
-    use super::{HEARTBEAT, ZedAgents};
+    use super::{HEARTBEAT, ZedAgents, tool_status};
 
     struct Rig {
         root: std::path::PathBuf,
@@ -838,5 +838,10 @@ mod tests {
             .send(end(acp_v1::StopReason::EndTurn))
             .unwrap();
         second_turn.await.unwrap();
+    }
+
+    #[test]
+    fn a_paused_call_still_claims_its_files() {
+        assert!(tool_status(ToolCallStatus::Paused).open());
     }
 }
