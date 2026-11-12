@@ -90,3 +90,4 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `agent::ThreadStore::init_global`, `LanguageModelRegistry::test` (`language_model` `test-support`) | `crates/agent/src/thread_store.rs:18`, `crates/language_model/src/registry.rs:136` |
 | `MultiWorkspace::test_new`, `workspace`; `Workspace::add_panel` | `crates/workspace/src/multi_workspace.rs:1642`, `:1304`; `workspace.rs:2837` |
 | `file_scan_inclusions` | `crates/settings_content/src/project.rs:192` |
+| `remote_connection` (`test-support`): no test calls it, but the test build turns on `remote`'s `Mock` connection, which `remote_connection` matches only with its own `test-support` | `crates/remote_connection/src/remote_connection.rs:256` |
