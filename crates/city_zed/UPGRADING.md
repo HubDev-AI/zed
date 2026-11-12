@@ -4,8 +4,8 @@ Every Zed API `city_zed` uses, with its place at `v1.28.1` (`e8bc16acee`). At a 
 
 1. Give the new tag its own base branch on the fork, at exactly the tag's commit: `git push origin <new-commit>:refs/heads/eof-<new>`. Older base branches stay as they are; a tag is never a descendant of the last one, so no base branch moves.
 2. Rebase the fork branch onto the tag: `git rebase --onto <new> <old> <branch>`. `script/fork-apply` stops when `crates/city_zed` is not there yet.
-3. Run `CARGO_NET_GIT_FETCH_WITH_CLI=true script/fork-apply` (eof is private).
-4. Move eof's `gpui` pin to the same tag, point `city_zed` at that eof revision and run `script/fork-apply` again to resolve the lock.
+3. Start from the tag's lock and run fork-apply (eof is private): `git checkout <new> -- Cargo.lock && CARGO_NET_GIT_FETCH_WITH_CLI=true script/fork-apply`. Do this whenever the eof pin moves too, so Zed's own crates keep the tag's versions and only what eof needs newer moves.
+4. Move eof's `gpui` pin to the same tag, point `city_zed` at that eof revision and repeat step 3.
 5. Find the upstream changes the compiler will name, then check each line below:
    - `git diff <old> <new> -- Cargo.toml | grep agent-client-protocol`
    - `git diff <old> <new> -- crates/acp_thread/src/acp_thread.rs | grep -A3 'pub enum'`
