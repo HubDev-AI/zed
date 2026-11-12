@@ -3,12 +3,15 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    io::{Read as _, Seek as _, SeekFrom},
+    path::PathBuf,
     sync::Arc,
 };
 
 use city_host::{Author, HostAuthor};
 use city_model::PathsChanged;
-use city_shell::{HostChange, Listing, Source};
+use city_shell::{HostChange, Reader, Source};
+use fs::{Fs, ReadSeek};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription};
 use language::{Buffer, BufferEditSource, BufferEvent};
@@ -38,12 +41,46 @@ pub(crate) fn source(
         .collect();
     let shown = listing.iter().cloned().collect();
     let feed = cx.new(|cx| ZedFeed::new(project, snapshot.id(), shown, sender, cx));
+    let reader = Arc::new(ZedReader {
+        fs: project.read(cx).fs().clone(),
+        root: root.clone(),
+    });
     Some(Source {
         root,
-        listing: Listing::Paths(listing),
+        listing,
+        reader,
         changes,
         keep_alive: Box::new(feed),
     })
+}
+
+/// Saved contents of the folder's files, read through Zed's `Fs`.
+struct ZedReader {
+    fs: Arc<dyn Fs>,
+    root: PathBuf,
+}
+
+impl ZedReader {
+    /// `open_sync` is the one `Fs` read that does not hop onto the background executor, which is
+    /// where the city calls the reader from; blocking on the others there could wait on itself.
+    fn open(&self, path: &str) -> Option<Box<dyn ReadSeek + Send + Sync>> {
+        futures::executor::block_on(self.fs.open_sync(&self.root.join(path))).ok()
+    }
+}
+
+impl Reader for ZedReader {
+    fn bytes(&self, path: &str) -> Option<u64> {
+        let mut file = self.open(path)?;
+        // A folder opens and seeks like a file but fails to read.
+        file.by_ref().take(1).read_to_end(&mut Vec::new()).ok()?;
+        file.seek(SeekFrom::End(0)).ok()
+    }
+
+    fn head(&self, path: &str, max: u64) -> Option<Vec<u8>> {
+        let mut head = Vec::new();
+        self.open(path)?.take(max).read_to_end(&mut head).ok()?;
+        Some(head)
+    }
 }
 
 /// Unsaved text a buffer has handed to the city: its path, its version, and who wrote it.
@@ -332,7 +369,7 @@ mod tests {
 
     use city_host::{Author, HostAuthor};
     use city_model::PathsChanged;
-    use city_shell::{HostChange, Listing, Source};
+    use city_shell::{HostChange, Source};
     use futures::channel::mpsc::UnboundedReceiver;
     use gpui::TestAppContext;
     use language::BufferEditSource;
@@ -449,7 +486,8 @@ mod tests {
         fs::write(root.join("src/parse.rs"), "pub fn parse() {}\n").unwrap();
         let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
         let Source {
-            listing,
+            mut listing,
+            reader,
             mut changes,
             keep_alive,
             ..
@@ -459,11 +497,12 @@ mod tests {
                 source(&project, sender, changes, cx)
             })
             .unwrap();
-        let Listing::Paths(mut listed) = listing else {
-            panic!("the Zed feed lists its own files");
-        };
-        listed.sort();
-        assert_eq!(listed, ["src/main.rs", "src/parse.rs"]);
+        listing.sort();
+        assert_eq!(listing, ["src/main.rs", "src/parse.rs"]);
+        assert_eq!(reader.bytes("src/main.rs"), Some(13));
+        assert_eq!(reader.head("src/main.rs", 2).as_deref(), Some(&b"fn"[..]));
+        assert_eq!(reader.bytes("src"), None, "a folder is no file");
+        assert_eq!(reader.bytes("src/gone.rs"), None);
         settled(&mut changes, cx);
 
         let buffer = project

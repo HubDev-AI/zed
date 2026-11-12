@@ -47,6 +47,7 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `Buffer::file`, `is_dirty`, `saved_mtime`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:1533`, `:373`, `:395` |
 | `text::Buffer::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
 | `RelPath::as_unix_str`, `fs::MTime` | `crates/path/src/rel_path.rs:268`, `fs.rs:341` |
+| `Project::fs`; `Fs::open_sync` (the reader blocks on it, so it must not hop onto the background executor), `ReadSeek` | `project.rs:2396`; `fs.rs:137`, `:79` |
 
 ## Settings (`zed_settings.rs`)
 
