@@ -433,20 +433,25 @@ fn tool_status(status: ToolCallStatus) -> ToolStatus {
 mod tests {
     use std::{fs, path::Path, rc::Rc};
 
-    use acp_thread::{AcpThread, AgentConnection as _, StubAgentConnection, ToolCallStatus};
+    use acp_thread::{
+        AcpThread, AgentConnection as _, AuthorizationKind, PermissionOptions, StubAgentConnection,
+        ToolCallStatus,
+    };
     use agent_client_protocol::v1::schema as acp_v1;
+    use agent_ui::{AgentPanel, test_support::open_thread_with_connection};
     use city_host::{
         AgentSignal, StopReason, ThreadId, ThreadState, ToolCall, ToolKind, ToolLocation,
         ToolStatus,
     };
     use city_shell::HostChange;
     use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-    use gpui::{AppContext as _, Entity, TestAppContext};
+    use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
     use settings::SettingsStore;
     use util::path_list::PathList;
+    use workspace::{MultiWorkspace, Workspace};
 
-    use super::{HEARTBEAT, ZedAgents, tool_status};
+    use super::{HEARTBEAT, ZedAgents, follow, tool_status};
 
     struct Rig {
         root: std::path::PathBuf,
@@ -1083,5 +1088,135 @@ mod tests {
             assert_eq!(started, Some(ThreadState::Working));
             assert_eq!(ended, Some(ThreadState::Stopped { reason: expected }));
         }
+    }
+
+    fn add_agent_panel(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<AgentPanel> {
+        workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| AgentPanel::test_new(workspace, window, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        })
+    }
+
+    // The city reaches threads only through Zed's agent panel, which may exist when the city opens
+    // or be added later; either way a thread opened in it is followed.
+    #[gpui::test]
+    async fn a_thread_opened_in_the_agent_panel_is_followed(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        agent_ui::test_support::init_test(cx);
+        cx.update(|cx| {
+            agent::ThreadStore::init_global(cx);
+            agent_ui::thread_metadata_store::ThreadMetadataStore::init_global(cx);
+            language_model::LanguageModelRegistry::test(cx);
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for panel_first in [true, false] {
+            let project =
+                Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+            let window =
+                cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+            let workspace = window
+                .read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone())
+                .unwrap();
+            let cx = &mut VisualTestContext::from_window(window.into(), cx);
+            let (sender, mut changes) = unbounded();
+            let panel = panel_first.then(|| add_agent_panel(&workspace, cx));
+            let _agents =
+                cx.update(|_, cx| follow(&workspace, panel.clone(), root.clone(), sender, cx));
+            let panel = panel.unwrap_or_else(|| add_agent_panel(&workspace, cx));
+
+            let connection = StubAgentConnection::new();
+            let respond = connection.defer_next_prompt_response();
+            open_thread_with_connection(&panel, connection, cx);
+            let thread = panel
+                .read_with(cx, |panel, cx| panel.active_agent_thread(cx))
+                .unwrap();
+            let id = thread.read_with(cx, |thread, _| ThreadId(thread.session_id().to_string()));
+            let turn = thread.update(cx, |thread, cx| thread.send(vec!["go".into()], cx));
+            cx.run_until_parked();
+            let mut signals = Vec::new();
+            while let Ok(change) = changes.try_recv() {
+                if let HostChange::Agent { signal } = change {
+                    signals.push(signal);
+                }
+            }
+            assert!(
+                signals.contains(&state(&id, ThreadState::Working)),
+                "panel first: {panel_first}, {signals:?}"
+            );
+            respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+            turn.await.unwrap();
+        }
+    }
+
+    // Calls reported after a turn has ended, such as the last statuses a stopped turn replays, are
+    // old news: they neither reach the city nor make the thread working again.
+    #[gpui::test]
+    async fn a_call_reported_after_its_turn_ended_is_not_sent(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["change".into()], cx));
+        cx.run_until_parked();
+        let main = rig.root.join("src/main.rs");
+        update(&thread, call_started("edit-1", &main, 2), cx);
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
+        rig.signals(cx);
+
+        update(
+            &thread,
+            call_status("edit-1", acp_v1::ToolCallStatus::Completed),
+            cx,
+        );
+        assert_eq!(unnamed(rig.signals(cx)), []);
+    }
+
+    // Zed marks a call as waiting for permission only through the request it raises after the
+    // call's own update, so the city learns of the wait from that request.
+    #[gpui::test]
+    async fn a_call_asking_for_permission_shows_it_waiting(cx: &mut TestAppContext) {
+        let mut rig = rig(StubAgentConnection::new(), cx).await;
+        let thread = rig.thread(cx).await;
+        let id = id_of(&thread, cx);
+        let respond = rig.connection.defer_next_prompt_response();
+        let turn = thread.update(cx, |thread, cx| thread.send(vec!["change".into()], cx));
+        cx.run_until_parked();
+        let main = rig.root.join("src/main.rs");
+        update(&thread, call_started("edit-1", &main, 2), cx);
+        rig.signals(cx);
+        let permission = thread
+            .update(cx, |thread, cx| {
+                thread.request_tool_call_authorization(
+                    acp_v1::ToolCallUpdate::new(
+                        "edit-1".to_string(),
+                        acp_v1::ToolCallUpdateFields::new(),
+                    ),
+                    PermissionOptions::Flat(vec![super::acp::PermissionOption::new(
+                        "allow",
+                        "Allow",
+                        super::acp::PermissionOptionKind::AllowOnce,
+                    )]),
+                    AuthorizationKind::PermissionGrant,
+                    cx,
+                )
+            })
+            .unwrap();
+        let signals = unnamed(rig.signals(cx));
+        assert!(
+            signals.contains(&edit_call(
+                &id,
+                ToolStatus::WaitingForPermission,
+                "src/main.rs"
+            )),
+            "{signals:?}"
+        );
+        drop(permission);
+        respond.send(end(acp_v1::StopReason::EndTurn)).unwrap();
+        turn.await.unwrap();
     }
 }

@@ -43,9 +43,9 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `Project::is_local`, `visible_worktrees`, `worktree_for_id`, `opened_buffers`, `buffer_store` | `crates/project/src/project.rs:3152`, `:2522`, `:2585`, `:2360`, `:6767` |
 | `project::Event::WorktreeUpdatedEntries`, `UpdatedEntriesSet` | `project.rs:384`, `crates/worktree/src/worktree.rs:4068` |
 | `Worktree::snapshot`; `Snapshot::id`, `abs_path`, `files`, `entry_for_path` | `worktree.rs:823`, `:2554`, `:2570`, `:2835`, `:2907` |
-| `Entry { id, mtime, is_ignored }`, `is_file` | `worktree.rs:3987`, `:4196` |
+| `Entry { id, mtime, is_ignored, is_always_included, is_fifo }`, `is_file` | `worktree.rs:3987`, `:4196` |
 | `BufferStoreEvent::BufferAdded` | `crates/project/src/buffer_store.rs:92` |
-| `BufferEvent::{Edited { source }, DirtyChanged, Saved, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |
+| `BufferEvent::{Edited { source }, DirtyChanged, Saved, FileHandleChanged, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |
 | `Buffer::file`, `is_dirty`, `saved_mtime`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:1533`, `:373`, `:395` |
 | `text::BufferSnapshot::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
 | `RelPath::as_unix_str`, `fs::MTime` | `crates/path/src/rel_path.rs:268`, `fs.rs:341` |
@@ -69,6 +69,7 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `ConversationView::root_thread_view`, `ThreadView.thread` | `crates/agent_ui/src/conversation_view.rs:896`, `conversation_view/thread_view.rs:737` |
 | `workspace::Event::PanelAdded` | `workspace.rs:1520` |
 | `AcpThreadEvent` | `crates/acp_thread/src/acp_thread.rs:3831` |
+| `AcpThread::foreground_activity`, `ForegroundActivity` (the state Zed itself shows) | `acp_thread.rs:4422`, `crates/acp_thread/src/submission.rs:352` |
 | `AcpThread::session_id`, `status`, `entries`, `title`, `connection`, `subagent`, `subagents` | `acp_thread.rs:4280`, `:4341`, `:4202`, `:4191`, `:4179`, `:6143`, `:6147` |
 | `ThreadStatus`, `AgentThreadEntry`, `ToolCallStatus` | `acp_thread.rs:3913`, `:565`, `:2027` |
 | `ToolCall { id, label, locations }`, `kind`, `status`; `ToolCallLocation` | `acp_thread.rs:1181`, `:1499`, `:1505`, `:1145` |
@@ -83,4 +84,10 @@ Removing the city takes both the `city_zed::init` line and the `CityView` keymap
 | `Project::test`, `RealFs` | `project.rs:2177` |
 | `StubAgentConnection` (`acp_thread` `test-support`) | `connection.rs:1014` |
 | `AcpThread::handle_session_update`, `mark_activity_unconfirmed`, `register_subagent` | `acp_thread.rs:4944`, `:4372`, `:6134` |
-| `Buffer::end_transaction_with_source` | `buffer.rs:2629` |
+| `Buffer::end_transaction_with_source`, `reload`; `Project::open_local_buffer` | `buffer.rs:2629`, `:1669`; `project.rs:3263` |
+| `StubAgentConnection::defer_next_prompt_response`, `with_receipt_submissions` | `connection.rs:1128`, `:1237` |
+| `AcpThread::update_session_state`, `request_permission`, `cancel_permission_request`, `is_waiting_for_confirmation` | `acp_thread.rs:4774`, `:6661`, `:6870`, `:4478` |
+| `agent_ui::test_support::{init_test, open_thread_with_connection}`, `AgentPanel::test_new`, `active_agent_thread`, `ThreadMetadataStore::init_global` (`agent_ui` `test-support`) | `crates/agent_ui/src/test_support.rs:106`, `:228`, `crates/agent_ui/src/agent_panel.rs:6729`, `:4158`, `crates/agent_ui/src/thread_metadata_store.rs:554` |
+| `agent::ThreadStore::init_global`, `LanguageModelRegistry::test` (`language_model` `test-support`) | `crates/agent/src/thread_store.rs:18`, `crates/language_model/src/registry.rs:136` |
+| `MultiWorkspace::test_new`, `workspace`; `Workspace::add_panel` | `crates/workspace/src/multi_workspace.rs:1642`, `:1304`; `workspace.rs:2837` |
+| `file_scan_inclusions` | `crates/settings_content/src/project.rs:192` |

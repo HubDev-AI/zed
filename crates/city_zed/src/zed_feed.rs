@@ -431,8 +431,8 @@ mod tests {
     use city_model::PathsChanged;
     use city_shell::{HostChange, Source};
     use futures::channel::mpsc::UnboundedReceiver;
-    use gpui::TestAppContext;
-    use language::BufferEditSource;
+    use gpui::{Entity, TestAppContext};
+    use language::{Buffer, BufferEditSource};
     use project::{Project, ProjectEntryId, RealFs};
     use settings::SettingsStore;
 
@@ -727,9 +727,11 @@ mod tests {
         });
         settled(&mut source.changes, cx);
         fs::write(root.join("build/keep.txt"), "keep, edited\n").unwrap();
+        fs::write(root.join("build/other.txt"), "other, edited\n").unwrap();
         let sent = settled(&mut source.changes, cx);
         assert!(source.listing.iter().any(|path| path == "build/keep.txt"));
         assert!(!source.listing.iter().any(|path| path == "build/other.txt"));
+        assert!(paths(&sent).created.is_empty(), "{sent:?}");
         assert_eq!(paths(&sent).modified, ["build/keep.txt"], "{sent:?}");
         assert!(paths(&sent).deleted.is_empty(), "{sent:?}");
     }
@@ -846,5 +848,103 @@ mod tests {
             matches!(last_text, Some(HostChange::Text { text: None, .. })),
             "{saved:?}"
         );
+    }
+
+    struct FeedRig {
+        root: std::path::PathBuf,
+        project: Entity<Project>,
+        _dir: tempfile::TempDir,
+    }
+
+    async fn feed_rig(cx: &mut TestAppContext) -> FeedRig {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        FeedRig {
+            root,
+            project,
+            _dir: dir,
+        }
+    }
+
+    impl FeedRig {
+        fn source(&self, cx: &mut TestAppContext) -> Source {
+            cx.update(|cx| {
+                let (sender, changes) = futures::channel::mpsc::unbounded();
+                source(&self.project, sender, changes, cx).unwrap()
+            })
+        }
+
+        async fn edited_buffer(&self, cx: &mut TestAppContext) -> Entity<Buffer> {
+            let buffer = self
+                .project
+                .update(cx, |project, cx| {
+                    project.open_local_buffer(self.root.join("main.rs"), cx)
+                })
+                .await
+                .unwrap();
+            buffer.update(cx, |buffer, cx| {
+                buffer.edit([(0..0, "// held\n")], None, cx)
+            });
+            buffer
+        }
+    }
+
+    fn dropped(path: &str) -> HostChange {
+        HostChange::Text {
+            path: path.into(),
+            text: None,
+            author: None,
+        }
+    }
+
+    // Unsaved text in a buffer opened before the city reaches the city as soon as it opens.
+    #[gpui::test]
+    async fn unsaved_text_from_before_the_city_opened_reaches_it(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let _buffer = rig.edited_buffer(cx).await;
+        let mut source = rig.source(cx);
+        assert_eq!(
+            settled(&mut source.changes, cx),
+            [HostChange::Text {
+                path: "main.rs".into(),
+                text: Some("// held\nfn main() {}\n".into()),
+                author: None,
+            }]
+        );
+    }
+
+    // A buffer closed with unsaved changes takes its text back, so the city shows the file on disk.
+    #[gpui::test]
+    async fn closing_a_buffer_with_unsaved_text_takes_the_text_back(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let mut source = rig.source(cx);
+        let buffer = rig.edited_buffer(cx).await;
+        settled(&mut source.changes, cx);
+        drop(buffer);
+        // GPUI releases the buffer on the next flush of effects.
+        cx.update(|_| {});
+        assert_eq!(settled(&mut source.changes, cx), [dropped("main.rs")]);
+    }
+
+    // Reloading discards the unsaved text, so the city shows the file on disk again.
+    #[gpui::test]
+    async fn reloading_a_buffer_with_unsaved_text_takes_the_text_back(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let mut source = rig.source(cx);
+        let buffer = rig.edited_buffer(cx).await;
+        settled(&mut source.changes, cx);
+        let reloaded = buffer.update(cx, |buffer, cx| buffer.reload(cx));
+        let mut sent = settled(&mut source.changes, cx);
+        reloaded.await.unwrap();
+        sent.extend(settled(&mut source.changes, cx));
+        assert_eq!(buffer.read_with(cx, |buffer, _| buffer.is_dirty()), false);
+        assert!(sent.contains(&dropped("main.rs")), "{sent:?}");
     }
 }

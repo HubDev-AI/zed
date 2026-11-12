@@ -39,10 +39,12 @@ util.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 acp_thread = { workspace = true, features = ["test-support"] }
+agent.workspace = true
 agent_ui = { workspace = true, features = ["test-support"] }
 anyhow.workspace = true
 city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
+language_model = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
 remote_connection = { workspace = true, features = ["test-support"] }
 settings = { workspace = true, features = ["test-support"] }
