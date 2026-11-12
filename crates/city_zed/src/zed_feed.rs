@@ -6,6 +6,7 @@ use std::{
     io::{Read as _, Seek as _, SeekFrom},
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 
 use city_host::{Author, HostAuthor};
@@ -13,7 +14,7 @@ use city_model::PathsChanged;
 use city_shell::{HostChange, Reader, Source};
 use fs::{Fs, ReadSeek};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription};
+use gpui::{App, AppContext as _, Context, Entity, EntityId, Subscription, Task};
 use language::{Buffer, BufferEditSource, BufferEvent};
 use project::{
     Entry, MTime, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId,
@@ -108,9 +109,14 @@ struct ZedFeed {
     /// write once more, and the city has already reread it.
     saved: HashMap<String, Option<MTime>>,
     buffers: HashMap<EntityId, [Subscription; 2]>,
+    /// Edits not yet handed to the city, waiting for typing to pause, with who made them.
+    pending: HashMap<EntityId, (Option<HostAuthor>, Task<()>)>,
     sender: UnboundedSender<HostChange>,
     _subscriptions: [Subscription; 2],
 }
+
+/// How long a buffer's edits wait for typing to pause before their text reaches the city.
+const QUIET: Duration = Duration::from_millis(300);
 
 impl ZedFeed {
     fn new(
@@ -127,6 +133,7 @@ impl ZedFeed {
             held: HashMap::default(),
             saved: HashMap::default(),
             buffers: HashMap::default(),
+            pending: HashMap::default(),
             sender,
             _subscriptions: [
                 cx.subscribe(project, |this, project, event: &project::Event, cx| {
@@ -208,13 +215,19 @@ impl ZedFeed {
             buffer,
             |this, buffer, event: &BufferEvent, cx| match event {
                 BufferEvent::Edited { source } => {
-                    this.buffer_changed(&buffer, edit_author(*source), cx)
+                    this.buffer_edited(&buffer, edit_author(*source), cx)
                 }
-                BufferEvent::DirtyChanged | BufferEvent::Reloaded => {
-                    this.buffer_changed(&buffer, None, cx)
+                // The edit that made the buffer dirty is already waiting for typing to pause.
+                BufferEvent::DirtyChanged
+                    if buffer.read(cx).is_dirty()
+                        && this.pending.contains_key(&buffer.entity_id()) => {}
+                BufferEvent::DirtyChanged
+                | BufferEvent::Reloaded
+                | BufferEvent::FileHandleChanged => this.flush(&buffer, cx),
+                BufferEvent::Saved => {
+                    this.pending.remove(&buffer.entity_id());
+                    this.buffer_saved(&buffer, cx)
                 }
-                BufferEvent::FileHandleChanged => this.flush(&buffer, cx),
-                BufferEvent::Saved => this.buffer_saved(&buffer, cx),
                 _ => {}
             },
         );
@@ -222,12 +235,41 @@ impl ZedFeed {
         self.buffers.insert(id, [events, release]);
     }
 
-    /// Hands over the buffer's text now, credited to whoever wrote the text the city holds.
+    /// Waits for a pause in the buffer's edits before handing its text over, since each handover
+    /// copies the whole buffer; an edit by someone else first hands over what the last one wrote.
+    fn buffer_edited(
+        &mut self,
+        buffer: &Entity<Buffer>,
+        author: Option<HostAuthor>,
+        cx: &mut Context<Self>,
+    ) {
+        let id = buffer.entity_id();
+        if self
+            .pending
+            .get(&id)
+            .is_some_and(|(pending, _)| *pending != author)
+        {
+            self.flush(buffer, cx);
+        }
+        let weak = buffer.downgrade();
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(QUIET).await;
+            if let Some(buffer) = weak.upgrade() {
+                this.update(cx, |this, cx| this.flush(&buffer, cx))
+                    .log_err();
+            }
+        });
+        self.pending.insert(id, (author, task));
+    }
+
+    /// Hands over the buffer's text now, credited to its waiting edits' author or, with none
+    /// waiting, to whoever wrote the text the city holds.
     fn flush(&mut self, buffer: &Entity<Buffer>, cx: &App) {
-        let author = self
-            .held
-            .get(&buffer.entity_id())
-            .and_then(|held| held.author.clone());
+        let id = buffer.entity_id();
+        let author = match self.pending.remove(&id) {
+            Some((author, _)) => author,
+            None => self.held.get(&id).and_then(|held| held.author.clone()),
+        };
         self.buffer_changed(buffer, author, cx);
     }
 
@@ -308,6 +350,7 @@ impl ZedFeed {
 
     fn buffer_released(&mut self, id: EntityId) {
         self.buffers.remove(&id);
+        self.pending.remove(&id);
         if let Some(held) = self.held.remove(&id) {
             self.send(HostChange::Text {
                 path: held.path,
@@ -744,6 +787,64 @@ mod tests {
                 }),
             }),
             "{sent:?}"
+        );
+    }
+
+    // Each handover copies the whole buffer and makes the city rebuild, so a burst of typing is
+    // handed over once it pauses; an edit saved before the pause must still end as the saved file.
+    #[gpui::test]
+    async fn a_burst_of_keystrokes_reaches_the_city_once(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        let mut source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap()
+        });
+        settled(&mut source.changes, cx);
+        let buffer = project
+            .update(cx, |project, cx| {
+                project.open_local_buffer(root.join("main.rs"), cx)
+            })
+            .await
+            .unwrap();
+        for _ in 0..5 {
+            buffer.update(cx, |buffer, cx| buffer.edit([(0..0, "x")], None, cx));
+            cx.run_until_parked();
+        }
+        let sent = settled(&mut source.changes, cx);
+        assert_eq!(
+            sent,
+            [HostChange::Text {
+                path: "main.rs".into(),
+                text: Some("xxxxxfn main() {}\n".into()),
+                author: Some(HostAuthor {
+                    author: Author::User,
+                    thread: None,
+                }),
+            }]
+        );
+
+        buffer.update(cx, |buffer, cx| buffer.edit([(0..0, "y")], None, cx));
+        cx.run_until_parked();
+        project
+            .update(cx, |project, cx| project.save_buffer(buffer.clone(), cx))
+            .await
+            .unwrap();
+        let saved = settled(&mut source.changes, cx);
+        let last_text = saved
+            .iter()
+            .rev()
+            .find(|change| matches!(change, HostChange::Text { .. }));
+        assert!(
+            matches!(last_text, Some(HostChange::Text { text: None, .. })),
+            "{saved:?}"
         );
     }
 }
