@@ -1,6 +1,6 @@
-//! The city's view settings kept under a `city` key in Zed's own settings file: read when the city
-//! starts, written back in place with Zed's JSON editor (comments and other keys stay as they
-//! are), and followed through Zed's config-file watcher while Zed runs.
+//! The city's view settings kept under a `city` key in Zed's own settings file: read through Zed's
+//! config-file watcher, first as the city starts and then on each edit while Zed runs, and written
+//! back in place with Zed's JSON editor (comments and other keys stay as they are).
 
 use std::{
     path::{Path, PathBuf},
@@ -37,9 +37,16 @@ pub(crate) fn from_settings_file(fs: Arc<dyn Fs>, path: PathBuf, cx: &mut App) -
         // so only a read under the lock is compared with `last`.
         while changes.next().await.is_some() {
             let mut last = last.lock().await;
-            let Ok(Some(saved)) = read(fs.as_ref(), &path).await.and_then(|text| parse(&text))
-            else {
-                continue;
+            let saved = match read(fs.as_ref(), &path)
+                .await
+                .and_then(|text| parse(&text).map_err(|e| format!("{}: {e}", path.display())))
+            {
+                Ok(Some(saved)) => saved,
+                Ok(None) => continue,
+                Err(reason) => {
+                    log::error!("{reason}");
+                    continue;
+                }
             };
             if last.as_ref() != Some(&saved) {
                 *last = Some(saved.clone());
@@ -66,16 +73,9 @@ struct ZedSettingsStore {
 
 impl SettingsStore for ZedSettingsStore {
     fn load(&self) -> Result<Option<Saved>, String> {
-        // The port's load is synchronous and runs once, as the city starts.
-        let text = futures::executor::block_on(read(self.fs.as_ref(), &self.path))?;
-        let saved = parse(&text).map_err(|e| format!("{}: {e}", self.path.display()))?;
-        // Held only by the watcher, which reads this same file and sets `last` itself.
-        if saved.is_some()
-            && let Some(mut last) = self.last.try_lock()
-        {
-            last.clone_from(&saved);
-        }
-        Ok(saved)
+        // The port's load runs on the main thread as the city starts, so it does not touch the
+        // disk: the watcher's first read of the file reaches the city through `updates`.
+        Ok(self.last.try_lock().and_then(|last| last.clone()))
     }
 
     fn save(&self, saved: &Saved) -> BoxFuture<'static, Result<String, String>> {
@@ -147,12 +147,13 @@ fn with_city(text: String, saved: &Saved) -> Result<String, String> {
 mod tests {
     use std::{path::Path, sync::Arc};
 
-    use city_settings::{Saved, Settings};
+    use city_settings::{Placement, Saved, Settings, Tuning, clamped};
     use gpui::{TestAppContext, UpdateGlobal as _};
+    use hud_view_settings::Saving;
     use project::{FakeFs, Fs as _};
     use settings::SettingsStore;
 
-    use super::{KEY, from_settings_file};
+    use super::{KEY, from_settings_file, parse};
 
     const PATH: &str = "/zed/settings.json";
 
@@ -179,34 +180,67 @@ mod tests {
         let fs = FakeFs::new(cx.executor());
         fs.create_dir(Path::new("/zed")).await.unwrap();
         put_city(&fs, USER_SETTINGS, saved).await;
-        let city = cx.update(|cx| from_settings_file(fs.clone(), PATH.into(), cx));
-        assert_eq!(city.store.load(), Ok(Some(saved.clone())));
+        let mut city = cx.update(|cx| from_settings_file(fs.clone(), PATH.into(), cx));
         cx.run_until_parked();
+        assert_eq!(city.updates.try_recv().ok(), Some(saved.clone()));
         (fs, city)
     }
 
-    // The city reads its settings from Zed's own file, and a file without them is simply new.
+    // Zed's start does not wait on its settings file: the city starts on defaults, and the file's
+    // settings, panel places included, take effect when the read lands.
     #[gpui::test]
-    async fn the_city_loads_its_settings_from_zeds_settings_file(cx: &mut TestAppContext) {
+    async fn the_city_starts_before_zeds_settings_file_is_read(cx: &mut TestAppContext) {
         let fs = FakeFs::new(cx.executor());
         fs.create_dir(Path::new("/zed")).await.unwrap();
-        let store = cx
-            .update(|cx| from_settings_file(fs.clone(), PATH.into(), cx))
-            .store;
-        assert_eq!(store.load(), Ok(None));
+        let mut saved = tuned(40.);
+        saved.panels.insert("map".into(), Placement::in_column(2));
+        put_city(&fs, USER_SETTINGS, &saved).await;
+
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            let city = from_settings_file(fs.clone(), PATH.into(), cx);
+            assert_eq!(city.store.load(), Ok(None));
+            city_shell::init(city, cx);
+            assert_eq!(*cx.global::<Tuning>(), clamped(Tuning::default()));
+        });
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(*cx.global::<Tuning>(), clamped(saved.tuning)));
+
+        let saving = cx.read(|cx| cx.global::<Saving>().0.clone());
+        cx.update(|cx| saving(Placement::in_column(1), cx))
+            .await
+            .unwrap();
+        let text = fs.load(Path::new(PATH)).await.unwrap();
+        let panels = parse(&text).unwrap().unwrap().panels;
+        assert_eq!(panels.get("map"), Some(&Placement::in_column(2)), "{text}");
+    }
+
+    // Edits reach the city once they hold its settings; a file without them is simply new, and
+    // settings that cannot be read are left out.
+    #[gpui::test]
+    async fn the_city_follows_its_settings_in_zeds_settings_file(cx: &mut TestAppContext) {
+        let fs = FakeFs::new(cx.executor());
+        fs.create_dir(Path::new("/zed")).await.unwrap();
+        let mut city = cx.update(|cx| from_settings_file(fs.clone(), PATH.into(), cx));
+        cx.run_until_parked();
+        assert!(city.updates.try_recv().is_err());
 
         fs.insert_file(PATH, USER_SETTINGS.into()).await;
-        assert_eq!(store.load(), Ok(None));
+        let mut city = cx.update(|cx| from_settings_file(fs.clone(), PATH.into(), cx));
+        cx.run_until_parked();
+        assert!(city.updates.try_recv().is_err());
 
         put_city(&fs, USER_SETTINGS, &tuned(40.)).await;
-        assert_eq!(store.load(), Ok(Some(tuned(40.))));
+        cx.run_until_parked();
+        assert_eq!(city.updates.try_recv().ok(), Some(tuned(40.)));
+        assert_eq!(city.store.load(), Ok(Some(tuned(40.))));
 
-        fs.insert_file(
-            PATH,
-            "{ \"city\": { \"tuning\": { \"pitch\": \"steep\" } } }".into(),
-        )
-        .await;
-        let error = store.load().unwrap_err();
+        let unreadable = "{ \"city\": { \"tuning\": { \"pitch\": \"steep\" } } }";
+        fs.insert_file(PATH, unreadable.into()).await;
+        cx.run_until_parked();
+        assert!(city.updates.try_recv().is_err());
+        let error = parse(unreadable).unwrap_err();
         assert!(error.contains("\"city\""), "{error}");
     }
 
