@@ -60,13 +60,17 @@ pub(crate) fn source(
     })
 }
 
-/// A file the city shows: what Zed's own file traversal lists and eof's shared listing rule keeps,
-/// less named pipes, which block the reader that opens them. The shared rule keeps the standalone
-/// app's city when the user takes names out of Zed's `file_scan_exclusions`.
+/// A file the city shows: one Zed scans that git does not ignore and eof's shared listing rule
+/// keeps, as the standalone app lists it. Named pipes would block the reader that opens them.
+/// `file_scan_inclusions` does not count, so a git-ignored `.env` stays out of the city, and
+/// neither does a link to outside the folder, which Zed lists only once its folder is expanded.
+/// The shared rule keeps the standalone app's city when the user takes names out of Zed's
+/// `file_scan_exclusions`.
 fn shown(entry: &Entry) -> bool {
     entry.is_file()
         && !entry.is_fifo
-        && (!entry.is_ignored || entry.is_always_included)
+        && !entry.is_ignored
+        && !entry.is_external
         && city_host::shown(entry.path.as_unix_str())
 }
 
@@ -429,6 +433,7 @@ mod tests {
     use language::{Buffer, BufferEditSource};
     use project::{Project, ProjectEntryId, RealFs};
     use settings::SettingsStore;
+    use util::rel_path::RelPath;
 
     use super::{paths_changed, source};
 
@@ -687,47 +692,35 @@ mod tests {
         );
     }
 
-    // Zed's file_scan_inclusions bring a git-ignored file back into the worktree; the city lists it
-    // as Zed does, so an edit must not then remove it.
+    // A git-ignored `.env` holds secrets the city would draw; Zed scans it through its default
+    // `file_scan_inclusions`, but the city leaves it out, and later writes to it change nothing.
     #[gpui::test]
-    async fn an_ignored_file_zed_scans_anyway_stays_shown_when_edited(cx: &mut TestAppContext) {
+    async fn a_git_ignored_env_file_is_never_shown(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         cx.update(|cx| {
             let settings = SettingsStore::test(cx);
             cx.set_global(settings);
         });
-        cx.update(|cx| {
-            gpui::BorrowAppContext::update_global::<SettingsStore, _>(cx, |store, cx| {
-                store.update_user_settings(cx, |settings| {
-                    settings.project.worktree.file_scan_inclusions =
-                        Some(settings::SplicingVec::from(vec![
-                            "build/keep.txt".to_string(),
-                        ]));
-                });
-            });
-        });
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         fs::create_dir_all(root.join(".git")).unwrap();
-        fs::write(root.join(".gitignore"), "build/\n").unwrap();
-        fs::create_dir_all(root.join("build")).unwrap();
-        fs::write(root.join("build/keep.txt"), "keep\n").unwrap();
-        fs::write(root.join("build/other.txt"), "other\n").unwrap();
+        fs::write(root.join(".gitignore"), ".env*\n").unwrap();
+        fs::write(root.join(".env"), "SECRET=1\n").unwrap();
+        fs::write(root.join("a.rs"), "x").unwrap();
         let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
         settled_project(cx);
         let mut source = cx.update(|cx| {
             let (sender, changes) = futures::channel::mpsc::unbounded();
             source(&project, sender, changes, cx).unwrap()
         });
+        let mut listing = source.listing.clone();
+        listing.sort();
+        assert_eq!(listing, [".gitignore", "a.rs"]);
         settled(&mut source.changes, cx);
-        fs::write(root.join("build/keep.txt"), "keep, edited\n").unwrap();
-        fs::write(root.join("build/other.txt"), "other, edited\n").unwrap();
+        fs::write(root.join(".env"), "SECRET=2\n").unwrap();
+        fs::write(root.join(".env.local"), "SECRET=3\n").unwrap();
         let sent = settled(&mut source.changes, cx);
-        assert!(source.listing.iter().any(|path| path == "build/keep.txt"));
-        assert!(!source.listing.iter().any(|path| path == "build/other.txt"));
-        assert!(paths(&sent).created.is_empty(), "{sent:?}");
-        assert_eq!(paths(&sent).modified, ["build/keep.txt"], "{sent:?}");
-        assert!(paths(&sent).deleted.is_empty(), "{sent:?}");
+        assert_eq!(paths(&sent), PathsChanged::default(), "{sent:?}");
     }
 
     fn settled_project(cx: &mut TestAppContext) {
@@ -738,49 +731,9 @@ mod tests {
         }
     }
 
-    /// The fixture of eof's `the_listing_shows_dotfiles_and_drops_version_control_and_ignored_files`
-    /// test in `host_standalone`, which pins the standalone app's listing of it.
-    const REPOSITORY: [(&str, &str); 24] = [
-        (".gitignore", "target/\n*.log\n"),
-        (".ignore", "docs/\n"),
-        (".github/workflows/ci.yml", "on: push\n"),
-        (".cargo/config.toml", "[build]\n"),
-        (".editorconfig", "root = true\n"),
-        ("docs/readme.md", "x"),
-        ("src/main.rs", "fn main() {}\n"),
-        ("target/debug/app", "x"),
-        ("run.log", "x"),
-        (".git/HEAD", "ref: refs/heads/main\n"),
-        (".git/info/exclude", ".eof-local-only/\n"),
-        (".eof-local-only/notes.md", "x"),
-        (".hg/store/data", "x"),
-        (".svn/entries", "x"),
-        ("src/.jj/repo", "x"),
-        (".sl/store", "x"),
-        (".repo/manifest.xml", "x"),
-        ("src/CVS/Root", "x"),
-        ("src/.DS_Store", "x"),
-        ("src/Thumbs.db", "x"),
-        (".classpath", "x"),
-        (".settings/eclipse.prefs", "x"),
-        ("vendor/lib/.git/HEAD", "x"),
-        ("vendor/lib/lib.rs", "x"),
-    ];
-
-    /// What the standalone app lists for `REPOSITORY`.
-    const STANDALONE_LISTING: [&str; 8] = [
-        ".cargo/config.toml",
-        ".editorconfig",
-        ".github/workflows/ci.yml",
-        ".gitignore",
-        ".ignore",
-        "docs/readme.md",
-        "src/main.rs",
-        "vendor/lib/lib.rs",
-    ];
-
-    /// The Zed tab's sorted listing of `REPOSITORY`, with the user's `file_scan_exclusions` when
-    /// given and Zed's defaults otherwise.
+    /// The Zed tab's sorted listing of eof's shared listing fixture, with the user's
+    /// `file_scan_exclusions` when given and Zed's defaults otherwise. The link to an outside
+    /// folder is expanded first, as in a project panel where the user opened it.
     async fn zed_listing(exclusions: Option<&[&str]>, cx: &mut TestAppContext) -> Vec<String> {
         cx.executor().allow_parking();
         cx.update(|cx| {
@@ -799,13 +752,24 @@ mod tests {
             });
         }
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().canonicalize().unwrap();
-        for (path, text) in REPOSITORY {
-            let path = root.join(path);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, text).unwrap();
-        }
+        let root = city_host::listing_fixture(&directory.path().canonicalize().unwrap());
         let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        settled_project(cx);
+        let (worktree_id, outside_folder) = project.read_with(cx, |project, cx| {
+            let worktree = project.visible_worktrees(cx).next().unwrap().read(cx);
+            let outside_folder = worktree
+                .entry_for_path(RelPath::from_unix_str("extdir").unwrap())
+                .unwrap()
+                .id;
+            (worktree.id(), outside_folder)
+        });
+        project
+            .update(cx, |project, cx| {
+                project.expand_entry(worktree_id, outside_folder, cx)
+            })
+            .unwrap()
+            .await
+            .unwrap();
         settled_project(cx);
         let mut listing = cx.update(|cx| {
             let (sender, changes) = futures::channel::mpsc::unbounded();
@@ -815,29 +779,90 @@ mod tests {
         listing
     }
 
-    // Both versions of eof draw the same city for one repository: dotfiles are shown, while
-    // version control folders at any depth, OS clutter and what git ignores are not.
+    // Both versions of eof draw the same city for one repository: the standalone app's own test
+    // asserts this same fixture and listing.
     #[gpui::test]
     async fn zed_lists_what_the_standalone_app_lists(cx: &mut TestAppContext) {
-        assert_eq!(zed_listing(None, cx).await, STANDALONE_LISTING);
+        assert_eq!(zed_listing(None, cx).await, city_host::LISTING_FIXTURE);
     }
 
     // Zed then scans the version control folders and OS clutter, but the city still leaves them out.
     #[gpui::test]
     async fn names_taken_out_of_zeds_exclusions_stay_out_of_the_city(cx: &mut TestAppContext) {
-        assert_eq!(zed_listing(Some(&[]), cx).await, STANDALONE_LISTING);
+        assert_eq!(zed_listing(Some(&[]), cx).await, city_host::LISTING_FIXTURE);
     }
 
-    // Zed never scans what the user adds, so the Zed city leaves it out while the standalone app,
-    // which does not read Zed's settings, still lists it.
+    // Zed scans the version control folders and OS clutter once the user takes them out of
+    // file_scan_exclusions; a file written or moved into one still never enters the city.
     #[gpui::test]
-    async fn names_added_to_zeds_exclusions_leave_only_the_zed_city(cx: &mut TestAppContext) {
-        let listing = zed_listing(Some(&["**/docs", settings::SplicingVec::REST]), cx).await;
-        let expected: Vec<&str> = STANDALONE_LISTING
-            .into_iter()
-            .filter(|path| *path != "docs/readme.md")
-            .collect();
-        assert_eq!(listing, expected);
+    async fn changes_under_names_taken_out_of_zeds_exclusions_stay_out_of_the_city(
+        cx: &mut TestAppContext,
+    ) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+        });
+        cx.update(|cx| {
+            gpui::BorrowAppContext::update_global::<SettingsStore, _>(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.project.worktree.file_scan_exclusions =
+                        Some(settings::SplicingVec::from(Vec::new()));
+                });
+            });
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join(".svn")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let project = Project::test(RealFs::new(None, cx.executor()), [root.as_path()], cx).await;
+        settled_project(cx);
+        let mut source = cx.update(|cx| {
+            let (sender, changes) = futures::channel::mpsc::unbounded();
+            source(&project, sender, changes, cx).unwrap()
+        });
+        settled(&mut source.changes, cx);
+
+        fs::write(root.join(".svn/entries"), "x").unwrap();
+        fs::write(root.join("src/.DS_Store"), "x").unwrap();
+        fs::rename(root.join("src/main.rs"), root.join(".svn/main.rs")).unwrap();
+        let sent = settled(&mut source.changes, cx);
+        let expected = PathsChanged {
+            deleted: vec!["src/main.rs".to_string()],
+            ..PathsChanged::default()
+        };
+        assert_eq!(paths(&sent), expected, "{sent:?}");
+
+        fs::rename(root.join(".svn/main.rs"), root.join("src/main.rs")).unwrap();
+        let sent = settled(&mut source.changes, cx);
+        let expected = PathsChanged {
+            created: vec!["src/main.rs".to_string()],
+            ..PathsChanged::default()
+        };
+        assert_eq!(paths(&sent), expected, "{sent:?}");
+    }
+
+    // eof's shared rule copies Zed's default file_scan_exclusions, so a Zed upgrade that changes
+    // them would make the standalone app list files the Zed tab does not.
+    #[gpui::test]
+    fn unshown_copies_zeds_default_exclusions(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let store = SettingsStore::test(cx);
+            let defaults = store
+                .raw_default_settings()
+                .project
+                .worktree
+                .file_scan_exclusions
+                .clone()
+                .unwrap()
+                .0;
+            let unshown: Vec<String> = city_host::UNSHOWN
+                .iter()
+                .map(|name| format!("**/{name}"))
+                .collect();
+            assert_eq!(defaults, unshown);
+        });
     }
 
     // The city drops held text for a path it no longer shows, so a file renamed under unsaved

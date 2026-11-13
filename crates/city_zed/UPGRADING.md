@@ -43,13 +43,13 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | `Project::is_local`, `visible_worktrees`, `worktree_for_id`, `opened_buffers`, `buffer_store` | `crates/project/src/project.rs:3152`, `:2522`, `:2585`, `:2360`, `:6767` |
 | `project::Event::WorktreeUpdatedEntries`, `UpdatedEntriesSet` | `project.rs:384`, `crates/worktree/src/worktree.rs:4068` |
 | `Worktree::snapshot`, `is_single_file`; `Snapshot::id`, `abs_path`, `files`, `entry_for_path` | `worktree.rs:823`, `:1275`, `:2554`, `:2570`, `:2835`, `:2907` |
-| `Entry { id, is_ignored, is_always_included, is_fifo }`, `is_file` | `worktree.rs:3987`, `:4196` |
+| `Entry { id, is_ignored, is_external, is_fifo }`, `is_file` | `worktree.rs:3987`, `:4196` |
 | `BufferStoreEvent::BufferAdded` | `crates/project/src/buffer_store.rs:92` |
 | `BufferEvent::{Edited { source }, DirtyChanged, Saved, FileHandleChanged, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |
 | `Buffer::file`, `is_dirty`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:373`, `:395` |
 | `text::BufferSnapshot::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
 | `RelPath::as_unix_str` | `crates/path/src/rel_path.rs:268` |
-| The default `file_scan_exclusions`: eof's `city_host::UNSHOWN` copies them, so a change there makes the standalone app list different files | `assets/settings/default.json:1788` |
+| The default `file_scan_exclusions`: eof's `city_host::UNSHOWN` copies them, and `unshown_copies_zeds_default_exclusions` fails when they differ | `assets/settings/default.json:1788` |
 | `Project::fs`; `Fs::open_sync` (the reader blocks on it, so it must not hop onto the background executor), `ReadSeek` | `project.rs:2396`; `fs.rs:137`, `:79` |
 
 ## Settings (`zed_settings.rs`)
@@ -91,5 +91,6 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | `agent_ui::test_support::{init_test, open_thread_with_connection}`, `AgentPanel::test_new`, `active_agent_thread`, `ThreadMetadataStore::init_global` (`agent_ui` `test-support`) | `crates/agent_ui/src/test_support.rs:106`, `:228`, `crates/agent_ui/src/agent_panel.rs:6729`, `:4158`, `crates/agent_ui/src/thread_metadata_store.rs:554` |
 | `agent::ThreadStore::init_global`, `LanguageModelRegistry::test` (`language_model` `test-support`) | `crates/agent/src/thread_store.rs:18`, `crates/language_model/src/registry.rs:136` |
 | `MultiWorkspace::test_new`, `workspace`; `Workspace::add_panel` | `crates/workspace/src/multi_workspace.rs:1642`, `:1304`; `workspace.rs:2837` |
-| `file_scan_inclusions`, `file_scan_exclusions`, `SplicingVec::REST` | `crates/settings_content/src/project.rs:192`, `:166`, `settings_content.rs:1585` |
+| `file_scan_exclusions`; `SettingsStore::raw_default_settings` | `crates/settings_content/src/project.rs:166`; `crates/settings/src/settings_store.rs:511` |
+| `Project::expand_entry`, `RelPath::from_unix_str` | `project.rs:2864`, `rel_path.rs:122` |
 | `remote_connection` (`test-support`): no test calls it, but the test build turns on `remote`'s `Mock` connection, which `remote_connection` matches only with its own `test-support` | `crates/remote_connection/src/remote_connection.rs:256` |
