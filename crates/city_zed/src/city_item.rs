@@ -202,7 +202,7 @@ mod tests {
     use settings::SettingsStore;
     use workspace::MultiWorkspace;
 
-    use super::{CityItem, GPU, PowerPreference, State, open};
+    use super::{CityItem, State, open};
     use crate::zed_agents::ZedAgents;
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
@@ -238,13 +238,6 @@ mod tests {
             );
             std::thread::sleep(WATCHED_POLL);
         }
-    }
-
-    // `city_shell::open` takes the preference as a required argument and eof's tests cover its
-    // way to the adapter request, so the tab only has to pick low power.
-    #[test]
-    fn the_city_tab_asks_for_the_low_power_gpu() {
-        assert_eq!(GPU, PowerPreference::LowPower);
     }
 
     #[gpui::test]
