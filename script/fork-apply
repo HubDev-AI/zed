@@ -94,5 +94,6 @@ eof_keymap=$(cargo metadata --format-version 1 |
 [[ -f "$eof_keymap" ]] || fail "no keymap.json in eof's input_keys crate"
 CITY_BLOCK="$(sed 's/^/  /' "$eof_keymap")," perl -0pi -e '
     s/^  \{\n    "context": "CityView",\n.*?^  \},?\n//ms;
+    die "a CityView block fork-apply did not write; remove it by hand\n" if /"context": "CityView"/;
     s/^\]\n?\z/$ENV{CITY_BLOCK}\n]\n/m or die "does not end with ]\n";
 ' "$KEYMAP" || fail "$KEYMAP: could not write the city block"
