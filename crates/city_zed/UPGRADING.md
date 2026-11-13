@@ -13,6 +13,7 @@ Every Zed API `city_zed` uses, with its place at `v1.28.1` (`e8bc16acee`). At a 
    - `ZED_RELEASE_CHANNEL=dev ZED_UPDATE_EXPLANATION="This build does not update itself." cargo build --profile release-fast -p zed --features gpui_platform/runtime_shaders`
    - `cargo test -p city_zed --features gpui_apple/runtime_shaders`
 7. Push the branch with `--force-with-lease=<branch>:<its old head>` and retarget its pull request: `gh pr edit <number> --base eof-<new>`. Its diff is then only the fork's own change.
+8. Once it is merged, set `FORK_BRANCH` in eof's `xtask/src/nightly.rs` to `eof-<new>`, so eof's nightly checks the new base branch.
 
 The only Zed files `script/fork-apply` changes are:
 - the root `Cargo.toml`;
