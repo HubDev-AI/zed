@@ -58,7 +58,7 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | API | at v1.28.1 |
 |---|---|
 | `settings::watch_config_file` (its text is only a change signal: the file is read again under the store's lock) | `crates/settings/src/settings_file.rs:171` |
-| `Fs::metadata` (`None` for a missing file), `load`, `canonicalize`, `atomic_write` | `crates/fs/src/fs.rs:148`, `:138`, `:145`, `:142` |
+| `Fs::metadata` (`None` for a missing file), `load`, `canonicalize`, `atomic_write`; the store's start-time `load` blocks the main thread on `metadata` and `load`, so they must finish without it | `crates/fs/src/fs.rs:148`, `:138`, `:145`, `:142` |
 | `settings_json::parse_json_with_comments`, `replace_value_in_json_text` (`editing` feature), `infer_json_indent_size` | `crates/settings_json/src/settings_json.rs:782`, `:105`, `:662` |
 
 ## Agents (`zed_agents.rs`): the fast-moving part
