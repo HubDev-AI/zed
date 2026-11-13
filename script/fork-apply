@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
 # Registers the `city_zed` crate in this Zed checkout. Every edit is skipped when it is already
-# there, so the script can run again on a new upstream tag. Removing the city takes the
-# `city_zed::init` line, the `CityView` keymap block and the `city` namespace in Zed's action test:
-# without the init line the city's actions leave the binary, Zed rejects a bundled keymap that names
-# unknown actions, and the test compares the namespaces the binary registers with its list.
+# there, so the script can run again on a new upstream tag. Only the `CityView` keymap block is
+# rewritten on every run, from eof's `keymap.json` at the pinned revision. Removing the city takes
+# the `city_zed::init` line, the `CityView` keymap block and the `city` namespace in Zed's action
+# test: without the init line the city's actions leave the binary, Zed rejects a bundled keymap
+# that names unknown actions, and the test compares the namespaces the binary registers with its
+# list.
 
 set -euo pipefail
 
@@ -61,41 +63,10 @@ fi
 grep -qxF '                "city",' "$ZED_TESTS" ||
     insert_after "$ZED_TESTS" '                "city",' '            let expected_namespaces = vec!['
 
-if ! grep -qF '"context": "CityView"' "$KEYMAP"; then
-    tail -n 1 "$KEYMAP" | grep -qx ']' || fail "$KEYMAP: does not end with ']'"
-    sed -i.bak '$d' "$KEYMAP"
-    rm "$KEYMAP.bak"
-    cat >>"$KEYMAP" <<'EOF'
-  {
-    "context": "CityView",
-    "bindings": {
-      "escape": "city::Back",
-      "b": "city::Back",
-      "backspace": "city::Back",
-      "-": "city::Back",
-      "h": "city::Home",
-      "home": "city::Home",
-      "=": "city::StepIn",
-      "+": "city::StepIn",
-      "tab": "city::CycleTarget",
-      "left": "city::PanLeft",
-      "right": "city::PanRight",
-      "up": "city::PanUp",
-      "down": "city::PanDown",
-      "pageup": "city::PageUp",
-      "pagedown": "city::PageDown",
-      "space": "city::ReadOrPageDown",
-      "f": "city::Read",
-      "enter": "city::Read",
-    },
-  },
-]
-EOF
-fi
-
 # eof asks for newer patch or minor releases of some crates than Zed's lockfile holds. Each
 # conflict cargo reports unlocks that one crate at its locked version, and nothing else moves.
 unlock=()
+resolved=false
 for _ in $(seq "$MAX_LOCK_UNLOCKS"); do
     if [[ ${#unlock[@]} -eq 0 ]]; then
         resolve=(cargo metadata --format-version 1)
@@ -104,7 +75,8 @@ for _ in $(seq "$MAX_LOCK_UNLOCKS"); do
     fi
     if output=$("${resolve[@]}" 2>&1 >/dev/null); then
         echo "$output" | grep -E '^ +(Updating|Adding|Removing|Locking) ' || true
-        exit 0
+        resolved=true
+        break
     fi
     name=$(echo "$output" | sed -n 's/^error: failed to select a version for `\([^`]*\)`.*/\1/p' | head -n 1)
     version=$(echo "$output" | sed -n "s/.*previously selected package \`$name v\([^\`]*\)\`.*/\1/p" | head -n 1)
@@ -114,4 +86,13 @@ for _ in $(seq "$MAX_LOCK_UNLOCKS"); do
     fi
     unlock+=(-p "$name@$version")
 done
-fail "more than $MAX_LOCK_UNLOCKS locked crates conflict with eof's requirements"
+$resolved || fail "more than $MAX_LOCK_UNLOCKS locked crates conflict with eof's requirements"
+
+# eof's key table, read from cargo's checkout of the pinned revision, replaces the city block.
+eof_keymap=$(cargo metadata --format-version 1 |
+    jq -r '.packages[] | select(.name == "input_keys") | .manifest_path | sub("Cargo.toml$"; "keymap.json")')
+[[ -f "$eof_keymap" ]] || fail "no keymap.json in eof's input_keys crate"
+CITY_BLOCK="$(sed 's/^/  /' "$eof_keymap")," perl -0pi -e '
+    s/^  \{\n    "context": "CityView",\n.*?^  \},?\n//ms;
+    s/^\]\n?\z/$ENV{CITY_BLOCK}\n]\n/m or die "does not end with ]\n";
+' "$KEYMAP" || fail "$KEYMAP: could not write the city block"

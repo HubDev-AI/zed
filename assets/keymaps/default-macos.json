@@ -1822,6 +1822,16 @@
       "space": "city::ReadOrPageDown",
       "f": "city::Read",
       "enter": "city::Read",
-    },
+      "alt-1": ["city::GoBookmark", 0],
+      "alt-2": ["city::GoBookmark", 1],
+      "alt-3": ["city::GoBookmark", 2],
+      "alt-4": ["city::GoBookmark", 3],
+      "alt-5": ["city::GoBookmark", 4],
+      "alt-cmd-1": ["city::SaveBookmark", 0],
+      "alt-cmd-2": ["city::SaveBookmark", 1],
+      "alt-cmd-3": ["city::SaveBookmark", 2],
+      "alt-cmd-4": ["city::SaveBookmark", 3],
+      "alt-cmd-5": ["city::SaveBookmark", 4]
+    }
   },
 ]
