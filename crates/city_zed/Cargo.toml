@@ -20,10 +20,10 @@ workspace.workspace = true
 acp_thread.workspace = true
 agent-client-protocol.workspace = true
 agent_ui.workspace = true
-city_model = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
-city_host = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
-city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f" }
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b" }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b" }
 clock.workspace = true
 fs.workspace = true
 futures.workspace = true
@@ -42,7 +42,8 @@ acp_thread = { workspace = true, features = ["test-support"] }
 agent.workspace = true
 agent_ui = { workspace = true, features = ["test-support"] }
 anyhow.workspace = true
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "2e0ed9c338fc735364db397e41d09aec437c468f", features = ["test-support"] }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b", features = ["test-support"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "3545a858d793dd1904cc4202c22313b28862845b", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 language_model = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
