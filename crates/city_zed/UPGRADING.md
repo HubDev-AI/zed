@@ -19,7 +19,7 @@ The only Zed files `script/fork-apply` changes are:
 - `crates/zed/Cargo.toml`;
 - `crates/zed/src/main.rs`;
 - `crates/zed/src/zed.rs`, where `test_action_namespaces` lists every action namespace the binary registers and gains `city`;
-- `assets/keymaps/default-macos.json`;
+- `assets/keymaps/default-macos.json`, whose `CityView` block fork-apply replaces on every run with eof's `crates/input_keys/keymap.json` at the pinned revision; `zed_keymap_holds_eofs_key_table` fails when they differ;
 - `Cargo.lock`.
 
 Removing the city takes the `city_zed::init` line, the `CityView` keymap block and the `city` namespace in `test_action_namespaces`.
