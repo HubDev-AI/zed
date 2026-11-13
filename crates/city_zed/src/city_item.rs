@@ -1,7 +1,7 @@
 use std::{any::Any, sync::Arc};
 
 use agent_ui::AgentPanel;
-use city_shell::{CityShell, Source};
+use city_shell::{CityShell, PowerPreference, Source};
 use futures::channel::mpsc::unbounded;
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Task, Window, div,
@@ -56,6 +56,9 @@ fn city_source(
     }
     Some(source)
 }
+
+/// The GPU the city draws on: a tab in an editor must not switch a Mac to its discrete GPU.
+const GPU: PowerPreference = PowerPreference::LowPower;
 
 /// The workspace whose agent panel the city follows, and the panel when it has one yet.
 type AgentHost = (Entity<Workspace>, Option<Entity<AgentPanel>>);
@@ -114,7 +117,7 @@ impl CityItem {
         self._keep_alive = std::mem::replace(&mut source.keep_alive, Box::new(()));
         let root = source.root.clone();
         let text_system = Arc::new(gpui_apple::AppleTextSystem::new());
-        let opening = city_shell::open(source, text_system, cx);
+        let opening = city_shell::open(source, text_system, GPU, cx);
         self._open = cx.spawn_in(window, async move |this, cx| {
             let opened = opening.await;
             this.update_in(cx, |this, window, cx| {
@@ -199,7 +202,7 @@ mod tests {
     use settings::SettingsStore;
     use workspace::MultiWorkspace;
 
-    use super::{CityItem, State, open};
+    use super::{CityItem, GPU, PowerPreference, State, open};
     use crate::zed_agents::ZedAgents;
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
@@ -235,6 +238,13 @@ mod tests {
             );
             std::thread::sleep(WATCHED_POLL);
         }
+    }
+
+    // `city_shell::open` takes the preference as a required argument and eof's tests cover its
+    // way to the adapter request, so the tab only has to pick low power.
+    #[test]
+    fn the_city_tab_asks_for_the_low_power_gpu() {
+        assert_eq!(GPU, PowerPreference::LowPower);
     }
 
     #[gpui::test]
