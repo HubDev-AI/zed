@@ -5,7 +5,10 @@
 use std::{
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use city_settings::{Saved, Settings, SettingsStore};
@@ -26,19 +29,21 @@ pub(crate) fn from_settings_file(fs: Arc<dyn Fs>, path: PathBuf, cx: &mut App) -
         fs: fs.clone(),
         path: path.clone(),
         last: Last::default(),
+        loaded: Arc::default(),
     });
     let (sender, updates) = unbounded();
     let (mut changes, watching) =
         settings::watch_config_file(cx.background_executor(), fs.clone(), path.clone());
-    let last = store.last.clone();
+    let (last, loaded) = (store.last.clone(), store.loaded.clone());
     cx.spawn(async move |_| {
         let _watching = watching;
         // The watcher's text was read before this lock was taken, maybe while a save was writing,
         // so only a read under the lock is compared with `last`.
         while changes.next().await.is_some() {
             let mut last = last.lock().await;
-            let saved = match read(fs.as_ref(), &path)
-                .await
+            let text = read(fs.as_ref(), &path).await;
+            loaded.store(true, Ordering::Release);
+            let saved = match text
                 .and_then(|text| parse(&text).map_err(|e| format!("{}: {e}", path.display())))
             {
                 Ok(Some(saved)) => saved,
@@ -69,6 +74,8 @@ struct ZedSettingsStore {
     fs: Arc<dyn Fs>,
     path: PathBuf,
     last: Last,
+    /// Whether the watcher has read the file yet. Until it has, the city holds its defaults.
+    loaded: Arc<AtomicBool>,
 }
 
 impl SettingsStore for ZedSettingsStore {
@@ -85,6 +92,7 @@ impl SettingsStore for ZedSettingsStore {
             self.last.clone(),
             saved.clone(),
         );
+        let loaded = self.loaded.load(Ordering::Acquire);
         async move {
             // The watcher takes this lock before it reads the file, so it never compares the file
             // from before this write with `last` from after it and sends the old settings back.
@@ -92,6 +100,12 @@ impl SettingsStore for ZedSettingsStore {
             // A settings file kept elsewhere through a link stays linked.
             let path = fs.canonicalize(&path).await.unwrap_or(path);
             let text = read(fs.as_ref(), &path).await?;
+            if !loaded && matches!(parse(&text), Ok(Some(_))) {
+                return Err(format!(
+                    "{}: the city's settings are still loading",
+                    path.display()
+                ));
+            }
             let text = with_city(text, &saved).map_err(|e| format!("{}: {e}", path.display()))?;
             fs.atomic_write(path.clone(), text)
                 .await
@@ -186,15 +200,20 @@ mod tests {
         (fs, city)
     }
 
-    // Zed's start does not wait on its settings file: the city starts on defaults, and the file's
-    // settings, panel places included, take effect when the read lands.
-    #[gpui::test]
-    async fn the_city_starts_before_zeds_settings_file_is_read(cx: &mut TestAppContext) {
+    async fn file_with_a_panel_place(cx: &mut TestAppContext) -> (Arc<FakeFs>, Saved) {
         let fs = FakeFs::new(cx.executor());
         fs.create_dir(Path::new("/zed")).await.unwrap();
         let mut saved = tuned(40.);
         saved.panels.insert("map".into(), Placement::in_column(2));
         put_city(&fs, USER_SETTINGS, &saved).await;
+        (fs, saved)
+    }
+
+    // Zed's start does not wait on its settings file: the city starts on defaults, and the file's
+    // settings, panel places included, take effect when the read lands.
+    #[gpui::test]
+    async fn the_city_starts_before_zeds_settings_file_is_read(cx: &mut TestAppContext) {
+        let (fs, saved) = file_with_a_panel_place(cx).await;
 
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
@@ -214,6 +233,26 @@ mod tests {
         let text = fs.load(Path::new(PATH)).await.unwrap();
         let panels = parse(&text).unwrap().unwrap().panels;
         assert_eq!(panels.get("map"), Some(&Placement::in_column(2)), "{text}");
+    }
+
+    // A save asked for before the first read lands would write the city's defaults over the
+    // settings the file holds, so it is refused and the file's settings still take effect.
+    #[gpui::test(iterations = 20)]
+    async fn a_save_before_the_first_read_keeps_the_files_settings(cx: &mut TestAppContext) {
+        let (fs, saved) = file_with_a_panel_place(cx).await;
+        let saving = cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            city_shell::init(from_settings_file(fs.clone(), PATH.into(), cx), cx);
+            let saving = cx.global::<Saving>().0.clone();
+            saving(Placement::in_column(1), cx)
+        });
+        let error = saving.await.unwrap_err();
+        assert!(error.contains("still loading"), "{error}");
+        cx.run_until_parked();
+        let text = fs.load(Path::new(PATH)).await.unwrap();
+        assert_eq!(parse(&text), Ok(Some(saved.clone())), "{text}");
+        cx.read(|cx| assert_eq!(*cx.global::<Tuning>(), clamped(saved.tuning)));
     }
 
     // Edits reach the city once they hold its settings; a file without them is simply new, and
