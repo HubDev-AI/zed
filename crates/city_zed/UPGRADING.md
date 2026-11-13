@@ -56,7 +56,8 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 
 | API | at v1.28.1 |
 |---|---|
-| `settings::watch_config_file` | `crates/settings/src/settings_file.rs:171` |
+| `settings::watch_config_file` (its text is only a change signal: the file is read again under the store's lock) | `crates/settings/src/settings_file.rs:171` |
+| `Fs::metadata` (`None` for a missing file), `load`, `canonicalize`, `atomic_write` | `crates/fs/src/fs.rs:148`, `:138`, `:145`, `:142` |
 | `settings_json::parse_json_with_comments`, `replace_value_in_json_text` (`editing` feature), `infer_json_indent_size` | `crates/settings_json/src/settings_json.rs:782`, `:105`, `:662` |
 
 ## Agents (`zed_agents.rs`): the fast-moving part
@@ -83,6 +84,7 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | API | at v1.28.1 |
 |---|---|
 | `Project::test`, `RealFs` | `project.rs:2177` |
+| `FakeFs::new`, `insert_file`, `pause_events`, `unpause_events_and_flush`; `Fs::create_dir` (`project` re-exports `fs`) | `fs.rs:1845`, `:1951`, `:2051`, `:2055`; `:105` |
 | `StubAgentConnection` (`acp_thread` `test-support`) | `connection.rs:1014` |
 | `AcpThread::handle_session_update`, `mark_activity_unconfirmed`, `register_subagent` | `acp_thread.rs:4944`, `:4372`, `:6134` |
 | `Buffer::end_transaction_with_source`, `reload`; `Project::open_local_buffer` | `buffer.rs:2629`, `:1669`; `project.rs:3263` |

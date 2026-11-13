@@ -3,8 +3,6 @@
 //! are), and followed through Zed's config-file watcher while Zed runs.
 
 use std::{
-    cell::RefCell,
-    io,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -12,7 +10,9 @@ use std::{
 
 use city_settings::{Saved, Settings, SettingsStore};
 use fs::Fs;
-use futures::{StreamExt as _, channel::mpsc::unbounded};
+use futures::{
+    FutureExt as _, StreamExt as _, channel::mpsc::unbounded, future::BoxFuture, lock::Mutex,
+};
 use gpui::App;
 
 /// The key the city's settings sit under in Zed's settings file. Zed reads past keys it does not
@@ -23,21 +23,29 @@ const KEY: &str = "city";
 /// runs sent to the city as they land.
 pub(crate) fn from_settings_file(fs: Arc<dyn Fs>, path: PathBuf, cx: &mut App) -> Settings {
     let store = Rc::new(ZedSettingsStore {
+        fs: fs.clone(),
         path: path.clone(),
-        last: RefCell::new(None),
+        last: Last::default(),
     });
     let (sender, updates) = unbounded();
-    let (mut texts, watching) = settings::watch_config_file(cx.background_executor(), fs, path);
-    let followed = store.clone();
+    let (mut changes, watching) =
+        settings::watch_config_file(cx.background_executor(), fs.clone(), path.clone());
+    let last = store.last.clone();
     cx.spawn(async move |_| {
         let _watching = watching;
-        while let Some(text) = texts.next().await {
-            let Ok(Some(saved)) = parse(&text) else {
+        // The watcher's text was read before this lock was taken, maybe while a save was writing,
+        // so only a read under the lock is compared with `last`.
+        while changes.next().await.is_some() {
+            let mut last = last.lock().await;
+            let Ok(Some(saved)) = read(fs.as_ref(), &path).await.and_then(|text| parse(&text))
+            else {
                 continue;
             };
-            let known = followed.last.replace(Some(saved.clone()));
-            if known.as_ref() != Some(&saved) && sender.unbounded_send(saved).is_err() {
-                break;
+            if last.as_ref() != Some(&saved) {
+                *last = Some(saved.clone());
+                if sender.unbounded_send(saved).is_err() {
+                    break;
+                }
             }
         }
     })
@@ -45,53 +53,64 @@ pub(crate) fn from_settings_file(fs: Arc<dyn Fs>, path: PathBuf, cx: &mut App) -
     Settings { store, updates }
 }
 
+/// What the file last held as far as the city knows, whether the city loaded it, saved it or was
+/// sent it, so a write of the same settings, such as the city's own save coming back through the
+/// watcher, is not sent again over what the city changed since.
+type Last = Arc<Mutex<Option<Saved>>>;
+
 struct ZedSettingsStore {
+    fs: Arc<dyn Fs>,
     path: PathBuf,
-    /// What the city last loaded, saved or was sent, so a write of the same settings, such as
-    /// the city's own save coming back through the watcher, is not sent again.
-    last: RefCell<Option<Saved>>,
+    last: Last,
 }
 
 impl SettingsStore for ZedSettingsStore {
     fn load(&self) -> Result<Option<Saved>, String> {
-        let saved = read_text(&self.path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| parse(&text))
-            .map_err(|e| format!("{}: {e}", self.path.display()))?;
-        if saved.is_some() {
-            self.last.replace(saved.clone());
+        // The port's load is synchronous and runs once, as the city starts.
+        let text = futures::executor::block_on(read(self.fs.as_ref(), &self.path))?;
+        let saved = parse(&text).map_err(|e| format!("{}: {e}", self.path.display()))?;
+        // Held only by the watcher, which reads this same file and sets `last` itself.
+        if saved.is_some()
+            && let Some(mut last) = self.last.try_lock()
+        {
+            last.clone_from(&saved);
         }
         Ok(saved)
     }
 
-    fn save(&self, saved: &Saved) -> Result<String, String> {
-        // A settings file kept elsewhere through a link stays linked.
-        let path = std::fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
-        let text = read_text(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let text = with_city(text, saved).map_err(|e| format!("{}: {e}", path.display()))?;
-        self.last.replace(Some(saved.clone()));
-        write_text(&path, &text).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(format!("\"{KEY}\" in {}", path.display()))
+    fn save(&self, saved: &Saved) -> BoxFuture<'static, Result<String, String>> {
+        let (fs, path, last, saved) = (
+            self.fs.clone(),
+            self.path.clone(),
+            self.last.clone(),
+            saved.clone(),
+        );
+        async move {
+            // The watcher takes this lock before it reads the file, so it never compares the file
+            // from before this write with `last` from after it and sends the old settings back.
+            let mut last = last.lock().await;
+            // A settings file kept elsewhere through a link stays linked.
+            let path = fs.canonicalize(&path).await.unwrap_or(path);
+            let text = read(fs.as_ref(), &path).await?;
+            let text = with_city(text, &saved).map_err(|e| format!("{}: {e}", path.display()))?;
+            fs.atomic_write(path.clone(), text)
+                .await
+                .map_err(|e| format!("{}: {e:#}", path.display()))?;
+            *last = Some(saved);
+            Ok(format!("\"{KEY}\" in {}", path.display()))
+        }
+        .boxed()
     }
 }
 
 /// The settings file's text, empty when there is no file yet.
-fn read_text(path: &Path) -> io::Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+async fn read(fs: &dyn Fs, path: &Path) -> Result<String, String> {
+    match fs.metadata(path).await {
+        Ok(None) => Ok(String::new()),
+        Ok(Some(_)) => fs.load(path).await,
         Err(e) => Err(e),
     }
-}
-
-/// Writes through a file beside `path` and a rename, so Zed's watcher never reads half a file.
-fn write_text(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(folder) = path.parent() {
-        std::fs::create_dir_all(folder)?;
-    }
-    let partial = path.with_extension("json.city-part");
-    std::fs::write(&partial, text)?;
-    std::fs::rename(partial, path)
+    .map_err(|e| format!("{}: {e:#}", path.display()))
 }
 
 /// The city's settings in a settings file's text, `None` when it has none.
@@ -126,22 +145,16 @@ fn with_city(text: String, saved: &Saved) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::Path,
-        time::{Duration, Instant},
-    };
+    use std::{path::Path, sync::Arc};
 
-    use city_settings::Saved;
-    use futures::channel::mpsc::UnboundedReceiver;
+    use city_settings::{Saved, Settings};
     use gpui::{TestAppContext, UpdateGlobal as _};
-    use project::RealFs;
+    use project::{FakeFs, Fs as _};
     use settings::SettingsStore;
 
     use super::{KEY, from_settings_file};
 
-    const DEADLINE: Duration = Duration::from_secs(10);
-    const POLL: Duration = Duration::from_millis(20);
+    const PATH: &str = "/zed/settings.json";
 
     const USER_SETTINGS: &str = r#"// Zed settings
 {
@@ -157,55 +170,42 @@ mod tests {
         saved
     }
 
-    fn put_city(path: &Path, text: &str, saved: &Saved) {
+    async fn put_city(fs: &FakeFs, text: &str, saved: &Saved) {
         let text = super::with_city(text.to_owned(), saved).unwrap();
-        fs::write(path, text).unwrap();
+        fs.insert_file(PATH, text.into_bytes()).await;
     }
 
-    fn next_update<T>(updates: &mut UnboundedReceiver<T>, cx: &mut TestAppContext) -> T {
-        let started = Instant::now();
-        loop {
-            cx.executor().advance_clock(Duration::from_millis(200));
-            cx.run_until_parked();
-            if let Ok(update) = updates.try_recv() {
-                return update;
-            }
-            assert!(started.elapsed() < DEADLINE, "no update arrived");
-            std::thread::sleep(POLL);
-        }
-    }
-
-    fn settle(cx: &mut TestAppContext) {
-        for _ in 0..10 {
-            cx.executor().advance_clock(Duration::from_millis(200));
-            cx.run_until_parked();
-            std::thread::sleep(POLL);
-        }
+    async fn city_with(saved: &Saved, cx: &mut TestAppContext) -> (Arc<FakeFs>, Settings) {
+        let fs = FakeFs::new(cx.executor());
+        fs.create_dir(Path::new("/zed")).await.unwrap();
+        put_city(&fs, USER_SETTINGS, saved).await;
+        let city = cx.update(|cx| from_settings_file(fs.clone(), PATH.into(), cx));
+        assert_eq!(city.store.load(), Ok(Some(saved.clone())));
+        cx.run_until_parked();
+        (fs, city)
     }
 
     // The city reads its settings from Zed's own file, and a file without them is simply new.
     #[gpui::test]
     async fn the_city_loads_its_settings_from_zeds_settings_file(cx: &mut TestAppContext) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        let real_fs = RealFs::new(None, cx.executor());
-
+        let fs = FakeFs::new(cx.executor());
+        fs.create_dir(Path::new("/zed")).await.unwrap();
         let store = cx
-            .update(|cx| from_settings_file(real_fs, path.clone(), cx))
+            .update(|cx| from_settings_file(fs.clone(), PATH.into(), cx))
             .store;
         assert_eq!(store.load(), Ok(None));
 
-        fs::write(&path, USER_SETTINGS).unwrap();
+        fs.insert_file(PATH, USER_SETTINGS.into()).await;
         assert_eq!(store.load(), Ok(None));
 
-        put_city(&path, USER_SETTINGS, &tuned(40.));
+        put_city(&fs, USER_SETTINGS, &tuned(40.)).await;
         assert_eq!(store.load(), Ok(Some(tuned(40.))));
 
-        fs::write(
-            &path,
-            "{ \"city\": { \"tuning\": { \"pitch\": \"steep\" } } }",
+        fs.insert_file(
+            PATH,
+            "{ \"city\": { \"tuning\": { \"pitch\": \"steep\" } } }".into(),
         )
-        .unwrap();
+        .await;
         let error = store.load().unwrap_err();
         assert!(error.contains("\"city\""), "{error}");
     }
@@ -213,17 +213,16 @@ mod tests {
     // Saving changes only the city's key: Zed's own settings, comments and all, read as before.
     #[gpui::test]
     async fn the_city_saves_into_zeds_settings_file_and_leaves_the_rest(cx: &mut TestAppContext) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        fs::write(&path, USER_SETTINGS).unwrap();
-        let real_fs = RealFs::new(None, cx.executor());
+        let fs = FakeFs::new(cx.executor());
+        fs.create_dir(Path::new("/zed")).await.unwrap();
+        fs.insert_file(PATH, USER_SETTINGS.into()).await;
         let store = cx
-            .update(|cx| from_settings_file(real_fs, path.clone(), cx))
+            .update(|cx| from_settings_file(fs.clone(), PATH.into(), cx))
             .store;
 
-        let saved_to = store.save(&tuned(50.)).unwrap();
+        let saved_to = store.save(&tuned(50.)).await.unwrap();
         assert!(saved_to.contains("settings.json"), "{saved_to}");
-        let text = fs::read_to_string(&path).unwrap();
+        let text = fs.load(Path::new(PATH)).await.unwrap();
         assert!(text.contains("// a comment that must survive"), "{text}");
         assert!(text.contains(&format!("\"{KEY}\"")), "{text}");
         assert_eq!(store.load(), Ok(Some(tuned(50.))));
@@ -246,24 +245,40 @@ mod tests {
     // come back to it.
     #[gpui::test]
     async fn an_outside_edit_of_zeds_settings_file_reaches_the_city(cx: &mut TestAppContext) {
-        cx.executor().allow_parking();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("settings.json");
-        put_city(&path, USER_SETTINGS, &tuned(40.));
-        let real_fs = RealFs::new(None, cx.executor());
-        let mut city = cx.update(|cx| from_settings_file(real_fs, path.clone(), cx));
-        assert_eq!(city.store.load(), Ok(Some(tuned(40.))));
-        settle(cx);
+        let (fs, mut city) = city_with(&tuned(40.), cx).await;
 
-        city.store.save(&tuned(45.)).unwrap();
-        settle(cx);
+        city.store.save(&tuned(45.)).await.unwrap();
+        cx.run_until_parked();
         assert!(
             city.updates.try_recv().is_err(),
             "the city's own save came back"
         );
 
-        let edited = fs::read_to_string(&path).unwrap();
-        put_city(&path, &edited, &tuned(70.));
-        assert_eq!(next_update(&mut city.updates, cx), tuned(70.));
+        let edited = fs.load(Path::new(PATH)).await.unwrap();
+        put_city(&fs, &edited, &tuned(70.)).await;
+        cx.run_until_parked();
+        assert_eq!(city.updates.try_recv().ok(), Some(tuned(70.)));
+    }
+
+    // A save queued behind another can write while the watcher still handles the first one's
+    // write; that first write must not come back as an outside edit over the second.
+    #[gpui::test(iterations = 100)]
+    async fn a_save_queued_behind_another_does_not_send_the_first_back(cx: &mut TestAppContext) {
+        let (fs, mut city) = city_with(&tuned(40.), cx).await;
+
+        fs.pause_events();
+        city.store.save(&tuned(45.)).await.unwrap();
+        let second = cx.executor().spawn(city.store.save(&tuned(50.)));
+        fs.unpause_events_and_flush();
+        cx.run_until_parked();
+        second.await.unwrap();
+        cx.run_until_parked();
+        assert!(city.updates.try_recv().is_err(), "the first save came back");
+
+        let edited = fs.load(Path::new(PATH)).await.unwrap();
+        put_city(&fs, &edited, &tuned(70.)).await;
+        cx.run_until_parked();
+        assert_eq!(city.updates.try_recv().ok(), Some(tuned(70.)));
+        assert!(city.updates.try_recv().is_err());
     }
 }
