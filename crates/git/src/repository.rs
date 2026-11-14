@@ -828,6 +828,13 @@ pub trait GitRepository: Send + Sync {
     fn load_revisions(&self, revisions: Vec<String>)
     -> BoxFuture<'_, Result<Vec<Option<Vec<u8>>>>>;
 
+    /// Each revision's blob id and size, without reading the blob; `None` where the revision is
+    /// missing or not a blob.
+    fn blob_sizes(
+        &self,
+        revisions: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<Option<(String, u64)>>>>;
+
     fn head_sha(&self) -> BoxFuture<'_, Option<String>> {
         async move {
             self.revparse_batch(vec!["HEAD".into()])
@@ -1866,6 +1873,64 @@ impl GitRepository for RealGitRepository {
                             } else {
                                 results.push(None);
                             }
+                        }
+                        _ => bail!("invalid cat-file header: {header_line}"),
+                    }
+                }
+
+                drop(stdin);
+                process.output().await?;
+                Ok(results)
+            })
+            .boxed()
+    }
+
+    fn blob_sizes(
+        &self,
+        revisions: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<Option<(String, u64)>>>> {
+        let git = self.git_binary();
+        self.executor
+            .spawn(async move {
+                if revisions.is_empty() {
+                    return Ok(Vec::new());
+                }
+                if let Some(revision) = revisions.iter().find(|revision| revision.contains('\n')) {
+                    anyhow::bail!(
+                        "revision spec {revision:?} contains a newline and cannot be passed to git cat-file --batch-check"
+                    );
+                }
+
+                let mut process = git
+                    .build_command(&["cat-file", "--batch-check"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()?;
+
+                let mut stdin = BufWriter::new(process.stdin.take().context("no stdin")?);
+                let mut stdout = BufReader::new(process.stdout.take().context("no stdout")?);
+
+                let mut header_bytes = Vec::new();
+                let mut results = Vec::with_capacity(revisions.len());
+                for rev in &revisions {
+                    stdin.write_all(rev.as_bytes()).await?;
+                    stdin.write_all(b"\n").await?;
+                    stdin.flush().await?;
+
+                    header_bytes.clear();
+                    stdout.read_until(b'\n', &mut header_bytes).await?;
+                    let header_line = String::from_utf8_lossy(&header_bytes);
+
+                    let parts: Vec<&str> = header_line.trim().split(' ').collect();
+                    match parts[..] {
+                        [.., "missing"] => results.push(None),
+                        [id, object_type, size_str] => {
+                            let size: u64 = size_str
+                                .parse()
+                                .with_context(|| format!("invalid object size: {size_str}"))?;
+                            results.push((object_type == "blob").then(|| (id.to_string(), size)));
                         }
                         _ => bail!("invalid cat-file header: {header_line}"),
                     }

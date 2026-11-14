@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use city_host::{Author, HostAuthor, git::Git};
+use city_host::{Author, HostAuthor, git::Git, tuning::MAX_TEXT_BYTES};
 use city_model::PathsChanged;
 use city_shell::{HostChange, Reader, Source};
 use fs::{Fs, ReadSeek};
@@ -297,9 +297,11 @@ impl ZedFeed {
         let id = buffer.entity_id();
         let buffer = buffer.read(cx);
         let version = buffer.version();
+        // A text over the cap the city draws under is not handed over, or is taken back; the city
+        // then reads the file on disk.
         let held = self
             .path_in_worktree(buffer, cx)
-            .filter(|_| buffer.is_dirty());
+            .filter(|_| buffer.is_dirty() && buffer.len() as u64 <= MAX_TEXT_BYTES);
         if let Some(held_now) = self.held.get(&id) {
             if held.as_ref() == Some(&held_now.path) && held_now.version == version {
                 return;
@@ -434,7 +436,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use city_host::{Author, HostAuthor};
+    use city_host::{Author, HostAuthor, tuning::MAX_TEXT_BYTES};
     use city_model::PathsChanged;
     use city_shell::{HostChange, Source};
     use futures::channel::mpsc::UnboundedReceiver;
@@ -1060,6 +1062,28 @@ mod tests {
         drop(buffer);
         // GPUI releases the buffer on the next flush of effects.
         cx.update(|_| {});
+        assert_eq!(settled(&mut source.changes, cx), [dropped("main.rs")]);
+    }
+
+    // Unsaved text is handed over up to the cap the city draws under, the cap included; past it the
+    // text is taken back, so the city shows the file on disk.
+    #[gpui::test]
+    async fn unsaved_text_over_the_size_cap_is_taken_back(cx: &mut TestAppContext) {
+        let rig = feed_rig(cx).await;
+        let mut source = rig.source(cx);
+        let buffer = rig.edited_buffer(cx).await;
+        settled(&mut source.changes, cx);
+        let to_cap = MAX_TEXT_BYTES as usize - buffer.read_with(cx, |buffer, _| buffer.len());
+        buffer.update(cx, |buffer, cx| {
+            buffer.edit([(0..0, "x".repeat(to_cap))], None, cx)
+        });
+        let sent = settled(&mut source.changes, cx);
+        assert!(
+            matches!(&sent[..], [HostChange::Text { text: Some(text), .. }] if text.len() as u64 == MAX_TEXT_BYTES),
+            "{} changes sent",
+            sent.len()
+        );
+        buffer.update(cx, |buffer, cx| buffer.edit([(0..0, "x")], None, cx));
         assert_eq!(settled(&mut source.changes, cx), [dropped("main.rs")]);
     }
 

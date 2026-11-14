@@ -201,7 +201,10 @@ mod tests {
     };
 
     use city_diff::{Base, BranchChanges, Change, FileChanges, Kind, Lines};
-    use city_host::git::Git as _;
+    use city_host::{
+        git::{Capped, Git as _, Text},
+        tuning::MAX_TEXT_BYTES,
+    };
     use city_shell::CityShell;
     use gpui::{App, AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
@@ -268,7 +271,7 @@ mod tests {
     /// Git in `root`, kept apart from this machine's settings, as eof's own git tests run it.
     // Each fixture step must finish before the next, so blocking the test's thread is intended.
     #[allow(clippy::disallowed_methods)]
-    fn git(root: &Path, args: &[&str]) {
+    fn git(root: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
             .arg("-C")
             .arg(root)
@@ -283,15 +286,12 @@ mod tests {
             .unwrap();
         let said = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.success(), "git {args:?}: {said}");
+        String::from_utf8(out.stdout).unwrap()
     }
 
     fn commit(root: &Path, message: &str) {
         git(root, &["add", "-A"]);
         git(root, &["commit", "--quiet", "--allow-empty", "-m", message]);
-    }
-
-    fn numbered(lines: usize) -> String {
-        (1..=lines).map(|line| format!("line {line}\n")).collect()
     }
 
     fn change(kind: Kind, lines: Option<(u32, u32)>) -> Option<Change> {
@@ -301,10 +301,6 @@ mod tests {
 
     fn modified(added: u32, removed: u32) -> Option<Change> {
         change(Kind::Modified, Some((added, removed)))
-    }
-
-    fn added(lines: u32) -> Option<Change> {
-        change(Kind::Added, Some((lines, 0)))
     }
 
     /// A file changed only in the worktree, so against the base it changes the same.
@@ -345,138 +341,19 @@ mod tests {
         });
     }
 
-    // A feature branch behind and ahead of main, with a staged and unstaged file, an untracked
-    // and an ignored one, a file taken out of the index but kept on disk, a staged rename, a
-    // delete, a binary file, converted line endings, and folders, as eof's own git cases build them. The answers are what eof's standalone app, which
-    // reads git through its command line, gives for this same repository.
+    // Eof's shared branch fixture. The answers are what eof's standalone app, which reads git
+    // through its command line, gives for this same repository.
     #[gpui::test]
     async fn the_city_tab_counts_a_branch_as_the_standalone_app_does(cx: &mut TestAppContext) {
         init(cx);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
-        git(&root, &["init", "--quiet", "-b", "main"]);
-        for (path, text) in [
-            ("shared.rs", numbered(2)),
-            ("a.rs", numbered(10)),
-            (".gitignore", "*.log\n".into()),
-            ("old.rs", numbered(4)),
-            ("gone.rs", numbered(3)),
-            (".gitattributes", "*.txt text eol=crlf\n".into()),
-            ("a.txt", "one\r\ntwo\r\nthree\r\n".into()),
-            ("app/a.rs", numbered(2)),
-            ("other/b.rs", numbered(2)),
-            ("kept.rs", numbered(2)),
-        ] {
-            put(&root, path, text);
-        }
-        put(&root, "a.bin", b"\0\x01\x02");
-        commit(&root, "base");
-        git(&root, &["checkout", "--quiet", "-b", "feature"]);
-        put(&root, "mine.rs", numbered(5));
-        put(&root, "shared.rs", numbered(3));
-        commit(&root, "mine");
-        git(&root, &["checkout", "--quiet", "main"]);
-        put(&root, "theirs.rs", numbered(7));
-        commit(&root, "theirs");
-        git(&root, &["checkout", "--quiet", "feature"]);
-        let two = numbered(10).replace("line 2\n", "two\n");
-        put(&root, "a.rs", &two);
-        git(&root, &["add", "a.rs"]);
-        put(&root, "a.rs", two + "line 11\n");
-        put(&root, "new.rs", numbered(6));
-        put(&root, "build.log", numbered(9));
-        git(&root, &["mv", "old.rs", "moved.rs"]);
-        fs::remove_file(root.join("gone.rs")).unwrap();
-        put(&root, "a.bin", b"\0\x01\x03");
-        put(&root, "a.txt", "one\r\nTWO\r\nthree\r\n");
-        put(&root, "app/a.rs", numbered(3));
-        put(&root, "other/b.rs", numbered(3));
-        put(&root, "app/new.rs", numbered(1));
-        git(&root, &["rm", "--quiet", "--cached", "kept.rs"]);
-
-        let renamed = change(
-            Kind::Renamed {
-                from: "old.rs".into(),
-            },
-            Some((0, 0)),
-        );
-        let top = branch([
-            ("a.bin", unstaged(change(Kind::Modified, None))),
-            (
-                "a.rs",
-                FileChanges {
-                    against_base: modified(2, 1),
-                    staged: modified(1, 1),
-                    unstaged: modified(1, 0),
-                    ..FileChanges::default()
-                },
-            ),
-            ("a.txt", unstaged(modified(1, 1))),
-            ("app/a.rs", unstaged(modified(1, 0))),
-            (
-                "app/new.rs",
-                FileChanges {
-                    untracked: true,
-                    ..unstaged(added(1))
-                },
-            ),
-            ("gone.rs", unstaged(change(Kind::Deleted, Some((0, 3))))),
-            (
-                "kept.rs",
-                FileChanges {
-                    staged: change(Kind::Deleted, Some((0, 2))),
-                    unstaged: added(2),
-                    untracked: true,
-                    ..FileChanges::default()
-                },
-            ),
-            (
-                "mine.rs",
-                FileChanges {
-                    against_base: added(5),
-                    committed: added(5),
-                    ..FileChanges::default()
-                },
-            ),
-            (
-                "moved.rs",
-                FileChanges {
-                    against_base: renamed.clone(),
-                    staged: renamed,
-                    ..FileChanges::default()
-                },
-            ),
-            (
-                "new.rs",
-                FileChanges {
-                    untracked: true,
-                    ..unstaged(added(6))
-                },
-            ),
-            ("other/b.rs", unstaged(modified(1, 0))),
-            (
-                "shared.rs",
-                FileChanges {
-                    against_base: modified(1, 0),
-                    committed: modified(1, 0),
-                    ..FileChanges::default()
-                },
-            ),
-        ]);
+        city_diff::branch_fixture(&root);
+        let (top, app) = city_diff::branch_fixture_changes();
         let (_project, item, window) = open_city(&root, cx).await;
         wait_for_branch(Ok(top), &item, window);
 
         // A city of a folder below the repository's top sees only its own files.
-        let app = branch([
-            ("a.rs", unstaged(modified(1, 0))),
-            (
-                "new.rs",
-                FileChanges {
-                    untracked: true,
-                    ..unstaged(added(1))
-                },
-            ),
-        ]);
         let (_project, item, window) = open_city(&root.join("app"), cx).await;
         wait_for_branch(Ok(app), &item, window);
     }
@@ -501,6 +378,49 @@ mod tests {
         let (git, _follower) = cx.update(|cx| zed_git::follow(&project, worktree_id, cx));
         let head = git.head().await;
         assert!(matches!(head, Ok(Some(_))), "{head:?}");
+    }
+
+    // A blob over the size cap is given by its id and never read: its object is cut short after
+    // its header, so reading it whole fails.
+    #[gpui::test]
+    async fn a_git_text_over_the_size_cap_is_never_read(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "--quiet", "-b", "main"]);
+        put(&root, "small.rs", "small\n");
+        commit(&root, "small");
+        put(&root, "big.txt", "x".repeat(MAX_TEXT_BYTES as usize + 1));
+        git(&root, &["add", "big.txt"]);
+        let id = git(&root, &["rev-parse", ":big.txt"]).trim().to_string();
+        let object = root.join(".git/objects").join(&id[..2]).join(&id[2..]);
+        let whole = fs::read(&object).unwrap();
+        fs::remove_file(&object).unwrap();
+        fs::write(&object, &whole[..whole.len() / 2]).unwrap();
+
+        let project = Project::test(RealFs::new(None, cx.executor()), [], cx).await;
+        let (worktree, _) = project
+            .update(cx, |project, cx| {
+                project.find_or_create_worktree(&root, true, cx)
+            })
+            .await
+            .unwrap();
+        let worktree_id = worktree.read_with(cx, |worktree, _| worktree.id());
+        let (git, _follower) = cx.update(|cx| zed_git::follow(&project, worktree_id, cx));
+        let wanted = vec![
+            Text::Index("big.txt".into()),
+            Text::Head("small.rs".into()),
+            Text::Head("big.txt".into()),
+        ];
+        assert!(git.texts(wanted.clone()).await.is_err());
+        assert_eq!(
+            git.capped_texts(wanted).await,
+            Ok(vec![
+                Some(Capped::Over(id)),
+                Some(Capped::Text(b"small\n".to_vec())),
+                None,
+            ])
+        );
     }
 
     // Each reason is the standalone app's, word for word. The tab follows git work done after it

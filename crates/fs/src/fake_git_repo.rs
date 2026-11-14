@@ -408,6 +408,13 @@ impl GitRepository for FakeGitRepository {
         self.executor.spawn(fut).boxed()
     }
 
+    fn blob_sizes(
+        &self,
+        _revisions: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<Option<(String, u64)>>>> {
+        unimplemented!()
+    }
+
     fn show(&self, commit: String) -> BoxFuture<'_, Result<CommitDetails>> {
         self.with_state_async(false, move |state| {
             let sha = match state.refs.get(&commit) {
