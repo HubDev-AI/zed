@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use city_host::{Author, HostAuthor};
+use city_host::{Author, HostAuthor, git::Git};
 use city_model::PathsChanged;
 use city_shell::{HostChange, Reader, Source};
 use fs::{Fs, ReadSeek};
@@ -20,6 +20,8 @@ use project::{
     Entry, Project, ProjectEntryId, UpdatedEntriesSet, WorktreeId, buffer_store::BufferStoreEvent,
 };
 use util::ResultExt as _;
+
+use crate::zed_git::{self, ZedGit};
 
 /// The first visible folder of a local project as a city source, or `None` when there is none,
 /// as in a window opened on a single file.
@@ -47,16 +49,18 @@ pub(crate) fn source(
         .collect();
     let shown = listing.iter().cloned().collect();
     let feed = cx.new(|cx| ZedFeed::new(project, snapshot.id(), shown, sender, cx));
+    let (git, git_follower) = zed_git::follow(project, snapshot.id(), cx);
     let reader = Arc::new(ZedReader {
         fs: project.read(cx).fs().clone(),
         root: root.clone(),
+        git,
     });
     Some(Source {
         root,
         listing,
         reader,
         changes,
-        keep_alive: Box::new(feed),
+        keep_alive: Box::new((feed, git_follower)),
     })
 }
 
@@ -74,10 +78,11 @@ fn shown(entry: &Entry) -> bool {
         && city_host::shown(entry.path.as_unix_str())
 }
 
-/// Saved contents of the folder's files, read through Zed's `Fs`.
+/// Saved contents of the folder's files, read through Zed's `Fs`, and its git.
 struct ZedReader {
     fs: Arc<dyn Fs>,
     root: PathBuf,
+    git: Arc<ZedGit>,
 }
 
 impl ZedReader {
@@ -100,6 +105,10 @@ impl Reader for ZedReader {
         let mut head = Vec::new();
         self.open(path)?.take(max).read_to_end(&mut head).ok()?;
         Some(head)
+    }
+
+    fn git(&self) -> Option<Arc<dyn Git>> {
+        Some(self.git.clone())
     }
 }
 

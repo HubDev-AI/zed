@@ -192,12 +192,17 @@ impl Render for CityItem {
 mod tests {
     use std::{
         any::Any,
+        collections::BTreeMap,
+        fmt::Debug,
         fs,
         path::Path,
+        process::Command,
         time::{Duration, Instant},
     };
 
-    use gpui::{AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
+    use city_diff::{Base, BranchChanges, Change, FileChanges, Kind, Lines};
+    use city_shell::CityShell;
+    use gpui::{App, AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
     use settings::SettingsStore;
     use workspace::MultiWorkspace;
@@ -215,29 +220,349 @@ mod tests {
         }
     }
 
-    fn put(root: &Path, path: &str, text: &str) {
+    fn put(root: &Path, path: &str, text: impl AsRef<[u8]>) {
         let path = root.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
 
     fn wait_for(expected: usize, item: &Entity<CityItem>, cx: &mut VisualTestContext) {
+        wait_until(expected, item, cx, |shell, _| shell.file_count());
+    }
+
+    fn wait_for_branch(
+        expected: Result<BranchChanges, String>,
+        item: &Entity<CityItem>,
+        cx: &mut VisualTestContext,
+    ) {
+        wait_until(Some(expected), item, cx, |shell, cx| {
+            shell.city().read(cx).branch().cloned()
+        });
+    }
+
+    fn wait_until<T: PartialEq + Debug>(
+        expected: T,
+        item: &Entity<CityItem>,
+        cx: &mut VisualTestContext,
+        read: impl Fn(&CityShell, &App) -> T,
+    ) {
         let started = Instant::now();
         loop {
             cx.executor().advance_clock(project::FS_WATCH_LATENCY);
             cx.run_until_parked();
-            let count = item.read_with(cx, |item, cx| {
-                item.shell().map(|shell| shell.read(cx).file_count())
+            let shown = item.read_with(cx, |item, cx| {
+                item.shell().map(|shell| read(shell.read(cx), cx))
             });
-            if count == Some(expected) {
+            if shown.as_ref() == Some(&expected) {
                 return;
             }
             assert!(
                 started.elapsed() < WATCHED_DEADLINE,
-                "expected {expected} files, the city shows {count:?}"
+                "expected {expected:#?}, the city shows {shown:#?}"
             );
             std::thread::sleep(WATCHED_POLL);
         }
+    }
+
+    /// Git in `root`, kept apart from this machine's settings, as eof's own git tests run it.
+    // Each fixture step must finish before the next, so blocking the test's thread is intended.
+    #[allow(clippy::disallowed_methods)]
+    fn git(root: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "eof")
+            .env("GIT_AUTHOR_EMAIL", "eof@localhost")
+            .env("GIT_COMMITTER_NAME", "eof")
+            .env("GIT_COMMITTER_EMAIL", "eof@localhost")
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "git {args:?}: {said}");
+    }
+
+    fn commit(root: &Path, message: &str) {
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "--quiet", "--allow-empty", "-m", message]);
+    }
+
+    fn numbered(lines: usize) -> String {
+        (1..=lines).map(|line| format!("line {line}\n")).collect()
+    }
+
+    fn change(kind: Kind, lines: Option<(u32, u32)>) -> Option<Change> {
+        let lines = lines.map(|(added, removed)| Lines { added, removed });
+        Some(Change { kind, lines })
+    }
+
+    fn modified(added: u32, removed: u32) -> Option<Change> {
+        change(Kind::Modified, Some((added, removed)))
+    }
+
+    fn added(lines: u32) -> Option<Change> {
+        change(Kind::Added, Some((lines, 0)))
+    }
+
+    /// A file changed only in the worktree, so against the base it changes the same.
+    fn unstaged(change: Option<Change>) -> FileChanges {
+        FileChanges {
+            against_base: change.clone(),
+            unstaged: change,
+            ..FileChanges::default()
+        }
+    }
+
+    fn branch<'a>(files: impl IntoIterator<Item = (&'a str, FileChanges)>) -> BranchChanges {
+        BranchChanges {
+            base: Base::MergeBase("main".into()),
+            files: (files.into_iter())
+                .map(|(path, file)| (path.to_string(), file))
+                .collect::<BTreeMap<_, _>>(),
+        }
+    }
+
+    /// The city tab of `root`, with the project the workspace would hold, which watches the folder
+    /// only while it is held.
+    async fn open_city<'a>(
+        root: &Path,
+        cx: &'a mut TestAppContext,
+    ) -> (Entity<Project>, Entity<CityItem>, &'a mut VisualTestContext) {
+        let project = Project::test(RealFs::new(None, cx.executor()), [root], cx).await;
+        let (item, cx) = cx.add_window_view(|window, cx| CityItem::new(&project, None, window, cx));
+        (project, item, cx)
+    }
+
+    fn init(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            let settings = SettingsStore::test(cx);
+            cx.set_global(settings);
+            city_shell::init(test_settings(), cx);
+        });
+    }
+
+    // A feature branch behind and ahead of main, with a staged and unstaged file, an untracked
+    // and an ignored one, a file taken out of the index but kept on disk, a staged rename, a
+    // delete, a binary file, converted line endings, and folders, as eof's own git cases build them. The answers are what eof's standalone app, which
+    // reads git through its command line, gives for this same repository.
+    #[gpui::test]
+    async fn the_city_tab_counts_a_branch_as_the_standalone_app_does(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "--quiet", "-b", "main"]);
+        for (path, text) in [
+            ("shared.rs", numbered(2)),
+            ("a.rs", numbered(10)),
+            (".gitignore", "*.log\n".into()),
+            ("old.rs", numbered(4)),
+            ("gone.rs", numbered(3)),
+            (".gitattributes", "*.txt text eol=crlf\n".into()),
+            ("a.txt", "one\r\ntwo\r\nthree\r\n".into()),
+            ("app/a.rs", numbered(2)),
+            ("other/b.rs", numbered(2)),
+            ("kept.rs", numbered(2)),
+        ] {
+            put(&root, path, text);
+        }
+        put(&root, "a.bin", b"\0\x01\x02");
+        commit(&root, "base");
+        git(&root, &["checkout", "--quiet", "-b", "feature"]);
+        put(&root, "mine.rs", numbered(5));
+        put(&root, "shared.rs", numbered(3));
+        commit(&root, "mine");
+        git(&root, &["checkout", "--quiet", "main"]);
+        put(&root, "theirs.rs", numbered(7));
+        commit(&root, "theirs");
+        git(&root, &["checkout", "--quiet", "feature"]);
+        let two = numbered(10).replace("line 2\n", "two\n");
+        put(&root, "a.rs", &two);
+        git(&root, &["add", "a.rs"]);
+        put(&root, "a.rs", two + "line 11\n");
+        put(&root, "new.rs", numbered(6));
+        put(&root, "build.log", numbered(9));
+        git(&root, &["mv", "old.rs", "moved.rs"]);
+        fs::remove_file(root.join("gone.rs")).unwrap();
+        put(&root, "a.bin", b"\0\x01\x03");
+        put(&root, "a.txt", "one\r\nTWO\r\nthree\r\n");
+        put(&root, "app/a.rs", numbered(3));
+        put(&root, "other/b.rs", numbered(3));
+        put(&root, "app/new.rs", numbered(1));
+        git(&root, &["rm", "--quiet", "--cached", "kept.rs"]);
+
+        let renamed = change(
+            Kind::Renamed {
+                from: "old.rs".into(),
+            },
+            Some((0, 0)),
+        );
+        let top = branch([
+            ("a.bin", unstaged(change(Kind::Modified, None))),
+            (
+                "a.rs",
+                FileChanges {
+                    against_base: modified(2, 1),
+                    staged: modified(1, 1),
+                    unstaged: modified(1, 0),
+                    ..FileChanges::default()
+                },
+            ),
+            ("a.txt", unstaged(modified(1, 1))),
+            ("app/a.rs", unstaged(modified(1, 0))),
+            (
+                "app/new.rs",
+                FileChanges {
+                    untracked: true,
+                    ..unstaged(added(1))
+                },
+            ),
+            ("gone.rs", unstaged(change(Kind::Deleted, Some((0, 3))))),
+            (
+                "kept.rs",
+                FileChanges {
+                    staged: change(Kind::Deleted, Some((0, 2))),
+                    unstaged: added(2),
+                    untracked: true,
+                    ..FileChanges::default()
+                },
+            ),
+            (
+                "mine.rs",
+                FileChanges {
+                    against_base: added(5),
+                    committed: added(5),
+                    ..FileChanges::default()
+                },
+            ),
+            (
+                "moved.rs",
+                FileChanges {
+                    against_base: renamed.clone(),
+                    staged: renamed,
+                    ..FileChanges::default()
+                },
+            ),
+            (
+                "new.rs",
+                FileChanges {
+                    untracked: true,
+                    ..unstaged(added(6))
+                },
+            ),
+            ("other/b.rs", unstaged(modified(1, 0))),
+            (
+                "shared.rs",
+                FileChanges {
+                    against_base: modified(1, 0),
+                    committed: modified(1, 0),
+                    ..FileChanges::default()
+                },
+            ),
+        ]);
+        let (_project, item, window) = open_city(&root, cx).await;
+        wait_for_branch(Ok(top), &item, window);
+
+        // A city of a folder below the repository's top sees only its own files.
+        let app = branch([
+            ("a.rs", unstaged(modified(1, 0))),
+            (
+                "new.rs",
+                FileChanges {
+                    untracked: true,
+                    ..unstaged(added(1))
+                },
+            ),
+        ]);
+        let (_project, item, window) = open_city(&root.join("app"), cx).await;
+        wait_for_branch(Ok(app), &item, window);
+    }
+
+    // Each reason is the standalone app's, word for word. The tab follows git work done after it
+    // opened, a repository made in its folder included.
+    #[gpui::test]
+    async fn the_city_tab_says_plainly_why_it_has_no_branch(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        put(&root, "a.rs", "a\n");
+        let (_project, item, window) = open_city(&root, cx).await;
+        wait_for_branch(Err("not a git repository".into()), &item, window);
+
+        git(&root, &["init", "--quiet", "-b", "main"]);
+        commit(&root, "a");
+        wait_for_branch(Ok(branch([])), &item, window);
+        git(&root, &["checkout", "--quiet", "--orphan", "other"]);
+        put(&root, "b.rs", "b\n");
+        commit(&root, "b");
+        wait_for_branch(Err("no merge base with main".into()), &item, window);
+
+        git(&root, &["checkout", "--quiet", "main"]);
+        git(&root, &["checkout", "--quiet", "-b", "x"]);
+        put(&root, "x.rs", "x\n");
+        commit(&root, "x");
+        // Two branches that each merge the other leave two merge bases.
+        git(&root, &["checkout", "--quiet", "main"]);
+        put(&root, "y.rs", "y\n");
+        commit(&root, "y");
+        git(&root, &["checkout", "--quiet", "-b", "z"]);
+        git(&root, &["merge", "--quiet", "--no-edit", "x"]);
+        git(&root, &["checkout", "--quiet", "x"]);
+        git(&root, &["merge", "--quiet", "--no-edit", "main"]);
+        git(&root, &["checkout", "--quiet", "main"]);
+        git(&root, &["merge", "--quiet", "--no-edit", "z"]);
+        git(&root, &["checkout", "--quiet", "x"]);
+        put(&root, "w.rs", "w\n");
+        commit(&root, "w");
+        wait_for_branch(
+            Err("more than one merge base with main".into()),
+            &item,
+            window,
+        );
+    }
+
+    // Staging in a terminal reaches the city through Zed's own git events, as no file changes;
+    // text a buffer holds unsaved counts over the disk's.
+    #[gpui::test]
+    async fn the_city_tab_follows_staging_and_unsaved_text(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "--quiet", "-b", "main"]);
+        put(&root, "a.rs", "one\n");
+        put(&root, "b.rs", "one\n");
+        commit(&root, "one");
+        let (project, item, cx) = open_city(&root, cx).await;
+        wait_for_branch(Ok(branch([])), &item, cx);
+
+        put(&root, "b.rs", "one\ntwo\n");
+        wait_for_branch(Ok(branch([("b.rs", unstaged(modified(1, 0)))])), &item, cx);
+        git(&root, &["add", "b.rs"]);
+        let staged = FileChanges {
+            against_base: modified(1, 0),
+            staged: modified(1, 0),
+            ..FileChanges::default()
+        };
+        wait_for_branch(Ok(branch([("b.rs", staged.clone())])), &item, cx);
+
+        let buffer = project
+            .update(cx, |project, cx| {
+                project.open_local_buffer(root.join("a.rs"), cx)
+            })
+            .await
+            .unwrap();
+        buffer.update(cx, |buffer, cx| buffer.edit([(4..4, "more\n")], None, cx));
+        assert!(buffer.read_with(cx, |buffer, _| buffer.is_dirty()));
+        wait_for_branch(
+            Ok(branch([
+                ("a.rs", unstaged(modified(1, 0))),
+                ("b.rs", staged),
+            ])),
+            &item,
+            cx,
+        );
     }
 
     #[gpui::test]
