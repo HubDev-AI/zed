@@ -216,6 +216,15 @@ impl Git for ZedGit {
                         FileStatus::Untracked => Status::Untracked,
                         FileStatus::Ignored => return None,
                         FileStatus::Unmerged(_) => Status::Conflicted,
+                        // Zed folds git's `D ` and `??` lines for a file taken out of the index
+                        // but kept on disk into one entry; git and the standalone app call it
+                        // untracked.
+                        FileStatus::Tracked(tracked)
+                            if tracked.index_status == StatusCode::Deleted
+                                && tracked.worktree_status == StatusCode::Added =>
+                        {
+                            Status::Untracked
+                        }
                         FileStatus::Tracked(tracked) => Status::Tracked {
                             staged: kind(tracked.index_status),
                             unstaged: kind(tracked.worktree_status),
@@ -237,7 +246,8 @@ impl Git for ZedGit {
                 .map(|text| match text {
                     Text::Blob(oid) => oid,
                     Text::Head(path) => format!("HEAD:{}", found.top(&path)),
-                    Text::Index(path) => format!(":{}", found.top(&path)),
+                    // Stage 0 named outright, so a path such as `1:x.rs` is not read as a stage.
+                    Text::Index(path) => format!(":0:{}", found.top(&path)),
                 })
                 // A name with a line break fails the whole batch.
                 .map(|name| (!name.contains('\n')).then_some(name))

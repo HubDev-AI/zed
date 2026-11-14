@@ -67,6 +67,8 @@ The city's branch changes come from the repository Zed's git store finds for the
 | Git's own words in `diff_tree`'s error (`no merge base found`, `multiple merge bases found`), which the port's reasons are read from | `repository.rs:1969` |
 | `--no-optional-locks` on every command, so reading never writes the index; `git_status_args` (`--untracked-files=all --no-renames`, the standalone app's) | `repository.rs:3806`, `:3662` |
 | `DiffTreeType::MergeBase`, `TreeDiff`, `TreeDiffStatus`, `GitStatus`, `FileStatus`, `TrackedStatus`, `StatusCode` | `crates/git/src/status.rs:501`, `:516`, `:521`, `:431`, `:10`, `:31`, `:37` |
+| `TreeDiff`'s parser skips a committed type change (git's `T`, such as a file turned symlink), so the tab leaves out a change the standalone app counts as modified | `status.rs:556`-`:561` |
+| `GitStatus`'s parser folds a file taken out of the index but kept on disk (git's `D ` and `??`) into one index-Deleted, worktree-Added entry, which `zed_git.rs` gives back as untracked | `status.rs:462`-`:484` |
 | `RepoPath`; `RelPath::empty_arc`, `strip_prefix` | `repository.rs:4040`; `crates/path/src/rel_path.rs:45`, `:200` |
 
 ## Settings (`zed_settings.rs`)

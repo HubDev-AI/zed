@@ -345,8 +345,8 @@ mod tests {
     }
 
     // A feature branch behind and ahead of main, with a staged and unstaged file, an untracked
-    // and an ignored one, a staged rename, a delete, a binary file, converted line endings, and
-    // folders, as eof's own git cases build them. The answers are what eof's standalone app, which
+    // and an ignored one, a file taken out of the index but kept on disk, a staged rename, a
+    // delete, a binary file, converted line endings, and folders, as eof's own git cases build them. The answers are what eof's standalone app, which
     // reads git through its command line, gives for this same repository.
     #[gpui::test]
     async fn the_city_tab_counts_a_branch_as_the_standalone_app_does(cx: &mut TestAppContext) {
@@ -364,6 +364,7 @@ mod tests {
             ("a.txt", "one\r\ntwo\r\nthree\r\n".into()),
             ("app/a.rs", numbered(2)),
             ("other/b.rs", numbered(2)),
+            ("kept.rs", numbered(2)),
         ] {
             put(&root, path, text);
         }
@@ -390,6 +391,7 @@ mod tests {
         put(&root, "app/a.rs", numbered(3));
         put(&root, "other/b.rs", numbered(3));
         put(&root, "app/new.rs", numbered(1));
+        git(&root, &["rm", "--quiet", "--cached", "kept.rs"]);
 
         let renamed = change(
             Kind::Renamed {
@@ -418,6 +420,15 @@ mod tests {
                 },
             ),
             ("gone.rs", unstaged(change(Kind::Deleted, Some((0, 3))))),
+            (
+                "kept.rs",
+                FileChanges {
+                    staged: change(Kind::Deleted, Some((0, 2))),
+                    unstaged: added(2),
+                    untracked: true,
+                    ..FileChanges::default()
+                },
+            ),
             (
                 "mine.rs",
                 FileChanges {
