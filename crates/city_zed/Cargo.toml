@@ -20,10 +20,10 @@ workspace.workspace = true
 acp_thread.workspace = true
 agent-client-protocol.workspace = true
 agent_ui.workspace = true
-city_model = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
-city_host = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
-city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
+city_model = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39" }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39" }
+city_shell = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39", features = ["hud-agents", "lens-edit-tool", "lens-live-edits"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39" }
 clock.workspace = true
 fs.workspace = true
 futures.workspace = true
@@ -44,12 +44,12 @@ acp_thread = { workspace = true, features = ["test-support"] }
 agent.workspace = true
 agent_ui = { workspace = true, features = ["test-support"] }
 anyhow.workspace = true
-city_diff = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
-city_host = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647", features = ["test-support"] }
-city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647", features = ["test-support"] }
+city_diff = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39", features = ["test-support"] }
+city_host = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39", features = ["test-support"] }
+city_settings = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39", features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
-hud_view_settings = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
-input_keys = { git = "https://github.com/HubDev-AI/eof", rev = "a54259e3a8c294ba4dff67dfd94da8c2f88fc647" }
+hud_view_settings = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39" }
+input_keys = { git = "https://github.com/HubDev-AI/eof", rev = "27aa7767c3773a2a872abfd1e9aaaef5973f4e39" }
 language_model = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
 remote_connection = { workspace = true, features = ["test-support"] }

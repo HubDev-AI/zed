@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use city_host::git::{Git, GitResult, Kind, Status, Text, TreeChange};
+use city_host::{
+    git::{Capped, Git, GitResult, Kind, Status, Text, TreeChange},
+    tuning::MAX_TEXT_BYTES,
+};
 use futures::{
     FutureExt as _,
     channel::{
@@ -179,6 +182,21 @@ impl Found {
             false => format!("{}/{path}", self.prefix.as_unix_str()),
         }
     }
+
+    /// Each text's name as `load_blob_content`, `load_committed_text` and `load_index_text` give
+    /// it one at a time; `None` for a name git's batches cannot take.
+    fn names(&self, texts: Vec<Text>) -> Vec<Option<String>> {
+        (texts.into_iter())
+            .map(|text| match text {
+                Text::Blob(oid) => oid,
+                Text::Head(path) => format!("HEAD:{}", self.top(&path)),
+                // Stage 0 named outright, so a path such as `1:x.rs` is not read as a stage.
+                Text::Index(path) => format!(":0:{}", self.top(&path)),
+            })
+            // A name with a line break fails the whole batch.
+            .map(|name| (!name.contains('\n')).then_some(name))
+            .collect()
+    }
 }
 
 impl Git for ZedGit {
@@ -269,27 +287,48 @@ impl Git for ZedGit {
         .boxed()
     }
 
-    /// Every text in one `load_revisions` batch, by the names `load_blob_content`,
-    /// `load_committed_text` and `load_index_text` give it one at a time.
+    /// Every text in one `load_revisions` batch.
     fn texts(&self, texts: Vec<Text>) -> GitResult<'_, Vec<Option<Vec<u8>>>> {
         async move {
             let found = self.found().await?;
-            let names: Vec<Option<String>> = (texts.into_iter())
-                .map(|text| match text {
-                    Text::Blob(oid) => oid,
-                    Text::Head(path) => format!("HEAD:{}", found.top(&path)),
-                    // Stage 0 named outright, so a path such as `1:x.rs` is not read as a stage.
-                    Text::Index(path) => format!(":0:{}", found.top(&path)),
-                })
-                // A name with a line break fails the whole batch.
-                .map(|name| (!name.contains('\n')).then_some(name))
-                .collect();
+            let names = found.names(texts);
             let wanted = names.iter().flatten().cloned().collect();
             let mut loaded = (found.backend.load_revisions(wanted).await)
                 .map_err(reason)?
                 .into_iter();
             Ok((names.iter())
                 .map(|name| name.as_ref().and_then(|_| loaded.next().flatten()))
+                .collect())
+        }
+        .boxed()
+    }
+
+    /// Every text sized in one `blob_sizes` batch, then the blobs within the cap read by id in one
+    /// `load_revisions` batch, so a blob over the cap is never read.
+    fn capped_texts(&self, texts: Vec<Text>) -> GitResult<'_, Vec<Option<Capped>>> {
+        async move {
+            let found = self.found().await?;
+            let names = found.names(texts);
+            let wanted = names.iter().flatten().cloned().collect();
+            let mut sized = (found.backend.blob_sizes(wanted).await)
+                .map_err(reason)?
+                .into_iter();
+            let blobs: Vec<Option<(String, u64)>> = (names.iter())
+                .map(|name| name.as_ref().and_then(|_| sized.next().flatten()))
+                .collect();
+            let small = (blobs.iter().flatten())
+                .filter(|(_, size)| *size <= MAX_TEXT_BYTES)
+                .map(|(id, _)| id.clone())
+                .collect();
+            let mut loaded = (found.backend.load_revisions(small).await)
+                .map_err(reason)?
+                .into_iter();
+            Ok((blobs.into_iter())
+                .map(|blob| match blob {
+                    Some((id, size)) if size > MAX_TEXT_BYTES => Some(Capped::Over(id)),
+                    Some(_) => loaded.next().flatten().map(Capped::Text),
+                    None => None,
+                })
                 .collect())
         }
         .boxed()

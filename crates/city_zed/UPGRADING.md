@@ -23,6 +23,8 @@ The only Zed files `script/fork-apply` changes are:
 - `assets/keymaps/default-macos.json`, whose `CityView` block fork-apply replaces on every run with eof's `crates/input_keys/keymap.json` at the pinned revision; `zed_keymap_holds_eofs_key_table` fails when they differ;
 - `Cargo.lock`.
 
+The fork's own change to Zed, carried by the rebase, is `GitRepository::blob_sizes` in `crates/git/src/repository.rs`, with an `unimplemented!()` `FakeGitRepository::blob_sizes` in `crates/fs/src/fake_git_repo.rs`.
+
 Removing the city takes the `city_zed::init` line, the `CityView` keymap block and the `city` namespace in `test_action_namespaces`.
 
 ## Registration and the tab (`city_item.rs`)
@@ -48,7 +50,7 @@ Removing the city takes the `city_zed::init` line, the `CityView` keymap block a
 | `BufferStoreEvent::BufferAdded` | `crates/project/src/buffer_store.rs:92` |
 | `BufferEvent::{Edited { source }, DirtyChanged, Saved, FileHandleChanged, Reloaded}`, `BufferEditSource` | `crates/language/src/buffer.rs:333`-`:341`, `:311` |
 | `Buffer::file`, `is_dirty`; `File::path`, `worktree_id` | `buffer.rs:1523`, `:2534`, `:373`, `:395` |
-| `text::BufferSnapshot::version`, `text` | `crates/text/src/text.rs:2269`, `:2193` |
+| `text::BufferSnapshot::version`, `text`, `len` (a text over eof's size cap is not handed over) | `crates/text/src/text.rs:2269`, `:2193`, `:2131` |
 | `RelPath::as_unix_str` | `crates/path/src/rel_path.rs:268` |
 | The default `file_scan_exclusions`: eof's `city_host::UNSHOWN` copies them, and `unshown_copies_zeds_default_exclusions` fails when they differ | `assets/settings/default.json:1788` |
 | `Project::fs`; `Fs::open_sync` (the reader blocks on it, so it must not hop onto the background executor), `ReadSeek` | `project.rs:2396`; `fs.rs:137`, `:79` |
@@ -64,7 +66,8 @@ The city's branch changes come from the repository Zed's git store finds for the
 | `Worktree::as_local`, `LocalWorktree::scan_complete`: the port's first answer waits for the folder's scan, then for the repository it finds | `crates/worktree/src/worktree.rs:776`, `:1616` |
 | `Repository::send_job` (the one way to its backend), `RepositoryState::Local`, `LocalRepositoryState::backend`; `RepositorySnapshot::id` through `Repository`'s `Deref` | `git_store.rs:6780`, `:826`, `:770`; `:602`, `:761` |
 | `GitRepository::head_sha`, `default_branch(include_remote_name)` (the base's order, which eof's port copies), `diff_tree`, `status` | `crates/git/src/repository.rs:831`, `:1091`, `:846`, `:845` |
-| `GitRepository::load_revisions`: one `cat-file --batch` for all texts, by the names `load_index_text` (`:path`), `load_committed_text` (`HEAD:path`) and `load_blob_content` (the blob id) take one at a time; it fails the batch on a name with a line break | `repository.rs:828`, `:793`, `:801`, `:805` |
+| `GitRepository::load_revisions`: one `cat-file --batch` for all texts, by the names `load_index_text` (`:path`), `load_committed_text` (`HEAD:path`) and `load_blob_content` (the blob id) take one at a time; it fails the batch on a name with a line break. `capped_texts` gives it only the ids of blobs within eof's size cap | `repository.rs:828`, `:793`, `:801`, `:805` |
+| `GitRepository::blob_sizes`, the fork's own (not in the tag): one `cat-file --batch-check` sizing every name without reading it, so `capped_texts` leaves a blob over the cap unread | `repository.rs:833`, `RealGitRepository` `:1888` on the fork branch |
 | Git's own words in `diff_tree`'s error (`no merge base found`, `multiple merge bases found`), which the port's reasons are read from | `repository.rs:1969` |
 | `--no-optional-locks` on every command, so reading never writes the index; `git_status_args` (`--untracked-files=all --no-renames`, the standalone app's) | `repository.rs:3806`, `:3662` |
 | `DiffTreeType::MergeBase`, `TreeDiff`, `TreeDiffStatus`, `GitStatus`, `FileStatus`, `TrackedStatus`, `StatusCode` | `crates/git/src/status.rs:501`, `:516`, `:521`, `:431`, `:10`, `:31`, `:37` |

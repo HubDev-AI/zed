@@ -29,9 +29,8 @@ pub fn init(_: &mut App) {}
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use serde_json::{Map, Value, json};
+    use serde_json::Value;
 
-    // eof's own test pins its keymap.json, which fork-apply copies into Zed, to this table.
     #[test]
     fn zed_keymap_holds_eofs_key_table() {
         let keymap: Vec<Value> = settings_json::parse_json_with_comments(include_str!(
@@ -42,16 +41,10 @@ mod tests {
             .iter()
             .filter(|section| section["context"] == "CityView")
             .collect();
-        let bindings: Map<String, Value> = input_keys::BINDINGS
-            .iter()
-            .map(|&(keys, name, input)| {
-                let action = input.map_or(json!(name), |input| json!([name, input]));
-                (keys.to_string(), action)
-            })
-            .collect();
+        let eof: Value = serde_json::from_str(input_keys::KEYMAP_JSON).unwrap();
         assert_eq!(
             city_sections,
-            [&json!({ "context": "CityView", "bindings": bindings })],
+            [&eof],
             "run script/fork-apply to copy eof's keymap.json into Zed's keymap"
         );
     }
