@@ -201,6 +201,7 @@ mod tests {
     };
 
     use city_diff::{Base, BranchChanges, Change, FileChanges, Kind, Lines};
+    use city_host::git::Git as _;
     use city_shell::CityShell;
     use gpui::{App, AppContext as _, Entity, Focusable as _, TestAppContext, VisualTestContext};
     use project::{Project, RealFs};
@@ -208,7 +209,7 @@ mod tests {
     use workspace::MultiWorkspace;
 
     use super::{CityItem, State, open};
-    use crate::zed_agents::ZedAgents;
+    use crate::{zed_agents::ZedAgents, zed_git};
 
     const WATCHED_DEADLINE: Duration = Duration::from_secs(30);
     const WATCHED_POLL: Duration = Duration::from_millis(50);
@@ -478,6 +479,28 @@ mod tests {
         ]);
         let (_project, item, window) = open_city(&root.join("app"), cx).await;
         wait_for_branch(Ok(app), &item, window);
+    }
+
+    // A tab opened before Zed has scanned its folder: the first answer is already the repository's.
+    #[gpui::test]
+    async fn the_first_git_answer_is_the_scanned_repository(cx: &mut TestAppContext) {
+        init(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        git(&root, &["init", "--quiet", "-b", "main"]);
+        put(&root, "a.rs", "a\n");
+        commit(&root, "a");
+        let project = Project::test(RealFs::new(None, cx.executor()), [], cx).await;
+        let (worktree, _) = project
+            .update(cx, |project, cx| {
+                project.find_or_create_worktree(&root, true, cx)
+            })
+            .await
+            .unwrap();
+        let worktree_id = worktree.read_with(cx, |worktree, _| worktree.id());
+        let (git, _follower) = cx.update(|cx| zed_git::follow(&project, worktree_id, cx));
+        let head = git.head().await;
+        assert!(matches!(head, Ok(Some(_))), "{head:?}");
     }
 
     // Each reason is the standalone app's, word for word. The tab follows git work done after it

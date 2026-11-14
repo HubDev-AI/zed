@@ -6,7 +6,11 @@ use std::sync::Arc;
 use city_host::git::{Git, GitResult, Kind, Status, Text, TreeChange};
 use futures::{
     FutureExt as _,
-    channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+    channel::{
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded},
+        oneshot,
+    },
+    future::Shared,
 };
 use git::{
     repository::{GitRepository, RepoPath},
@@ -21,13 +25,16 @@ use project::{
         RepositoryState,
     },
 };
-use util::rel_path::RelPath;
+use util::{ResultExt as _, rel_path::RelPath};
 
 const NO_GIT: &str = "not a git repository";
 
 /// The folder's repository, read from whichever thread the city reads it on.
 pub(crate) struct ZedGit {
     repository: Mutex<Option<Found>>,
+    /// Resolves once the repository found after Zed's scan of the folder is set, so the first
+    /// answer is not an unscanned "not a git repository"; cancelled if the follower goes first.
+    scanned: Shared<oneshot::Receiver<()>>,
     listeners: Mutex<Vec<UnboundedSender<()>>>,
 }
 
@@ -44,8 +51,10 @@ pub(crate) struct GitFollower {
     git: Arc<ZedGit>,
     root: ProjectPath,
     repository: Option<RepositoryId>,
+    scanned: Option<oneshot::Sender<()>>,
+    _scanning: Task<()>,
     _finding: Task<()>,
-    _subscription: Subscription,
+    _subscription: Option<Subscription>,
 }
 
 /// The git of `worktree_id`'s folder, and the follower that must be held while the city reads it.
@@ -54,39 +63,52 @@ pub(crate) fn follow(
     worktree_id: WorktreeId,
     cx: &mut App,
 ) -> (Arc<ZedGit>, Entity<GitFollower>) {
+    let (scanned_sender, scanned) = oneshot::channel();
     let git = Arc::new(ZedGit {
         repository: Mutex::default(),
+        scanned: scanned.shared(),
         listeners: Mutex::default(),
     });
     let git_store = project.read(cx).git_store().clone();
-    let follower = cx.new(|cx| {
-        let mut follower = GitFollower {
-            git: git.clone(),
-            root: ProjectPath {
-                worktree_id,
-                path: RelPath::empty_arc(),
-            },
-            repository: None,
-            _finding: Task::ready(()),
-            _subscription: cx.subscribe(
-                &git_store,
-                |this: &mut GitFollower, git_store, event, cx| match event {
-                    GitStoreEvent::RepositoryAdded | GitStoreEvent::RepositoryRemoved(_) => {
-                        this.find(&git_store, cx)
-                    }
-                    GitStoreEvent::RepositoryUpdated(
-                        id,
-                        RepositoryEvent::StatusesChanged
-                        | RepositoryEvent::HeadChanged
-                        | RepositoryEvent::BranchListChanged,
-                        _,
-                    ) if this.repository == Some(*id) => this.git.touched(),
-                    _ => {}
-                },
-            ),
-        };
-        follower.find(&git_store, cx);
-        follower
+    let scan = (project.read(cx).worktree_for_id(worktree_id, cx))
+        .and_then(|worktree| Some(worktree.read(cx).as_local()?.scan_complete()));
+    let follower = cx.new(|cx| GitFollower {
+        git: git.clone(),
+        root: ProjectPath {
+            worktree_id,
+            path: RelPath::empty_arc(),
+        },
+        repository: None,
+        scanned: Some(scanned_sender),
+        // Zed's git store takes in the repositories a scan finds before this task resumes, as
+        // `Project::git_scans_complete` relies on.
+        _scanning: cx.spawn(async move |this, cx| {
+            if let Some(scan) = scan {
+                scan.await;
+            }
+            this.update(cx, |this: &mut GitFollower, cx| {
+                this._subscription = Some(cx.subscribe(
+                    &git_store,
+                    |this: &mut GitFollower, git_store, event, cx| match event {
+                        GitStoreEvent::RepositoryAdded | GitStoreEvent::RepositoryRemoved(_) => {
+                            this.find(&git_store, cx)
+                        }
+                        GitStoreEvent::RepositoryUpdated(
+                            id,
+                            RepositoryEvent::StatusesChanged
+                            | RepositoryEvent::HeadChanged
+                            | RepositoryEvent::BranchListChanged,
+                            _,
+                        ) if this.repository == Some(*id) => this.git.touched(),
+                        _ => {}
+                    },
+                ));
+                this.find(&git_store, cx);
+            })
+            .log_err();
+        }),
+        _finding: Task::ready(()),
+        _subscription: None,
     });
     (git, follower)
 }
@@ -99,7 +121,7 @@ impl GitFollower {
         self.repository = found.as_ref().map(|(repository, _)| repository.read(cx).id);
         let Some((repository, prefix)) = found else {
             self._finding = Task::ready(());
-            self.git.set(None);
+            self.set(None);
             return;
         };
         let backend = repository.update(cx, |repository, _| {
@@ -110,11 +132,20 @@ impl GitFollower {
                 }
             })
         });
-        let git = self.git.clone();
-        self._finding = cx.background_spawn(async move {
+        self._finding = cx.spawn(async move |this, cx| {
             let backend = backend.await.ok().flatten();
-            git.set(backend.map(|backend| Found { backend, prefix }));
+            this.update(cx, |this, _| {
+                this.set(backend.map(|backend| Found { backend, prefix }))
+            })
+            .log_err();
         });
+    }
+
+    fn set(&mut self, found: Option<Found>) {
+        self.git.set(found);
+        if let Some(scanned) = self.scanned.take() {
+            scanned.send(()).ok();
+        }
     }
 }
 
@@ -128,7 +159,8 @@ impl ZedGit {
         (self.listeners.lock()).retain(|listener| listener.unbounded_send(()).is_ok());
     }
 
-    fn found(&self) -> Result<Found, String> {
+    async fn found(&self) -> Result<Found, String> {
+        (self.scanned.clone().await).map_err(|_| NO_GIT.to_string())?;
         (self.repository.lock().clone()).ok_or_else(|| NO_GIT.to_string())
     }
 }
@@ -152,7 +184,7 @@ impl Found {
 impl Git for ZedGit {
     fn head(&self) -> GitResult<'_, Option<String>> {
         async move {
-            let found = self.found()?;
+            let found = self.found().await?;
             Ok(found.backend.head_sha().await)
         }
         .boxed()
@@ -160,7 +192,7 @@ impl Git for ZedGit {
 
     fn default_branch(&self) -> GitResult<'_, Option<String>> {
         async move {
-            let found = self.found()?;
+            let found = self.found().await?;
             let branch = found.backend.default_branch(true).await.map_err(reason)?;
             Ok(branch.map(String::from))
         }
@@ -170,7 +202,7 @@ impl Git for ZedGit {
     fn committed(&self, base: &str) -> GitResult<'_, Vec<(String, TreeChange)>> {
         let base = base.to_string();
         async move {
-            let found = self.found()?;
+            let found = self.found().await?;
             let request = DiffTreeType::MergeBase {
                 base: base.clone().into(),
                 head: "HEAD".into(),
@@ -205,7 +237,7 @@ impl Git for ZedGit {
 
     fn status(&self) -> GitResult<'_, Vec<(String, Status)>> {
         async move {
-            let found = self.found()?;
+            let found = self.found().await?;
             let listed = (found.backend)
                 .status(std::slice::from_ref(&found.prefix))
                 .await
@@ -241,7 +273,7 @@ impl Git for ZedGit {
     /// `load_committed_text` and `load_index_text` give it one at a time.
     fn texts(&self, texts: Vec<Text>) -> GitResult<'_, Vec<Option<Vec<u8>>>> {
         async move {
-            let found = self.found()?;
+            let found = self.found().await?;
             let names: Vec<Option<String>> = (texts.into_iter())
                 .map(|text| match text {
                     Text::Blob(oid) => oid,
