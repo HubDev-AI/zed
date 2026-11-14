@@ -61,6 +61,7 @@ The city's branch changes come from the repository Zed's git store finds for the
 |---|---|
 | `Project::git_store`, `ProjectPath`; `GitStore::repository_and_path_for_project_path` | `crates/project/src/project.rs:6771`, `:463`; `crates/project/src/git_store.rs:3202` |
 | `GitStoreEvent::{RepositoryAdded, RepositoryRemoved, RepositoryUpdated}`, `RepositoryEvent::{StatusesChanged, HeadChanged, BranchListChanged}` | `git_store.rs:871`, `:856` |
+| `Worktree::as_local`, `LocalWorktree::scan_complete`: the port's first answer waits for the folder's scan, then for the repository it finds | `crates/worktree/src/worktree.rs:776`, `:1616` |
 | `Repository::send_job` (the one way to its backend), `RepositoryState::Local`, `LocalRepositoryState::backend`; `RepositorySnapshot::id` through `Repository`'s `Deref` | `git_store.rs:6780`, `:826`, `:770`; `:602`, `:761` |
 | `GitRepository::head_sha`, `default_branch(include_remote_name)` (the base's order, which eof's port copies), `diff_tree`, `status` | `crates/git/src/repository.rs:831`, `:1091`, `:846`, `:845` |
 | `GitRepository::load_revisions`: one `cat-file --batch` for all texts, by the names `load_index_text` (`:path`), `load_committed_text` (`HEAD:path`) and `load_blob_content` (the blob id) take one at a time; it fails the batch on a name with a line break | `repository.rs:828`, `:793`, `:801`, `:805` |
