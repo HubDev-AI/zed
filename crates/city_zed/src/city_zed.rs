@@ -5,6 +5,8 @@ mod zed_agents;
 #[cfg(target_os = "macos")]
 mod zed_feed;
 #[cfg(target_os = "macos")]
+mod zed_git;
+#[cfg(target_os = "macos")]
 mod zed_settings;
 
 use gpui::{App, actions};
