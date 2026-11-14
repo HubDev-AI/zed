@@ -2955,9 +2955,11 @@ dependencies = [
 [[package]]
 name = "city_core"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
+ "city_layout",
  "city_nav_model",
+ "city_purpose",
  "glam 0.34.3",
  "gpui",
  "schemars 1.0.4",
@@ -2967,7 +2969,7 @@ dependencies = [
 [[package]]
 name = "city_derive"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_lang",
@@ -2978,7 +2980,7 @@ dependencies = [
 [[package]]
 name = "city_host"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_model",
  "futures 0.3.34",
@@ -2987,7 +2989,7 @@ dependencies = [
 [[package]]
 name = "city_lang"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_model",
 ]
@@ -2995,7 +2997,7 @@ dependencies = [
 [[package]]
 name = "city_layout"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_model",
  "nalgebra",
@@ -3005,12 +3007,12 @@ dependencies = [
 [[package]]
 name = "city_model"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 
 [[package]]
 name = "city_nav_model"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "glam 0.34.3",
 ]
@@ -3018,12 +3020,12 @@ dependencies = [
 [[package]]
 name = "city_purpose"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 
 [[package]]
 name = "city_registry"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_host",
@@ -3035,7 +3037,7 @@ dependencies = [
 [[package]]
 name = "city_render"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3051,18 +3053,19 @@ dependencies = [
 [[package]]
 name = "city_settings"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
- "city_view",
+ "city_layout",
+ "city_nav_model",
  "futures 0.3.34",
- "hud_kit",
+ "gpui",
  "serde",
 ]
 
 [[package]]
 name = "city_shell"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "anyhow",
  "city_core",
@@ -3111,7 +3114,7 @@ dependencies = [
 [[package]]
 name = "city_view"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_host",
@@ -3122,11 +3125,11 @@ dependencies = [
  "city_purpose",
  "city_registry",
  "city_render",
+ "city_settings",
  "fnv",
  "glam 0.34.3",
  "gpui",
  "log",
- "serde",
 ]
 
 [[package]]
@@ -3147,6 +3150,7 @@ dependencies = [
  "futures 0.3.34",
  "gpui",
  "gpui_apple",
+ "hud_view_settings",
  "input_keys",
  "language",
  "language_model",
@@ -5426,7 +5430,7 @@ dependencies = [
 [[package]]
 name = "eco_cargo"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "cargo_toml 1.0.1",
  "city_lang",
@@ -5435,7 +5439,7 @@ dependencies = [
 [[package]]
 name = "eco_nix"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
 ]
@@ -5443,7 +5447,7 @@ dependencies = [
 [[package]]
 name = "eco_npm"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "serde_json",
@@ -5452,7 +5456,7 @@ dependencies = [
 [[package]]
 name = "eco_python"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
 ]
@@ -5460,7 +5464,7 @@ dependencies = [
 [[package]]
 name = "eco_ruby"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
 ]
@@ -8580,11 +8584,10 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 [[package]]
 name = "hud_agents"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_registry",
- "city_view",
  "gpui",
  "hud_kit",
 ]
@@ -8592,11 +8595,11 @@ dependencies = [
 [[package]]
 name = "hud_breadcrumb"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_nav_model",
- "city_view",
+ "city_registry",
  "gpui",
  "hud_kit",
 ]
@@ -8604,21 +8607,20 @@ dependencies = [
 [[package]]
 name = "hud_kit"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
+ "city_settings",
  "gpui",
- "serde",
 ]
 
 [[package]]
 name = "hud_map"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_nav_model",
- "city_view",
  "glam 0.34.3",
  "gpui",
  "hud_kit",
@@ -8627,11 +8629,12 @@ dependencies = [
 [[package]]
 name = "hud_view_settings"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
+ "city_core",
+ "city_layout",
  "city_registry",
  "city_settings",
- "city_view",
  "gpui",
  "hud_kit",
 ]
@@ -9186,7 +9189,7 @@ dependencies = [
 [[package]]
 name = "input_keys"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "gpui",
@@ -9209,7 +9212,7 @@ dependencies = [
 [[package]]
 name = "input_pointer"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_nav_model",
@@ -9220,7 +9223,7 @@ dependencies = [
 [[package]]
 name = "input_trackpad"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_core",
  "city_nav_model",
@@ -9827,7 +9830,7 @@ checksum = "884f3e747ed2dcee867cda1b0c31a048f9e20de2d916a248949319921a2e666e"
 [[package]]
 name = "lang_assets"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9837,7 +9840,7 @@ dependencies = [
 [[package]]
 name = "lang_git"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9846,7 +9849,7 @@ dependencies = [
 [[package]]
 name = "lang_ini"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9855,7 +9858,7 @@ dependencies = [
 [[package]]
 name = "lang_json"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9864,7 +9867,7 @@ dependencies = [
 [[package]]
 name = "lang_markdown"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9873,7 +9876,7 @@ dependencies = [
 [[package]]
 name = "lang_rust"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9882,7 +9885,7 @@ dependencies = [
 [[package]]
 name = "lang_text"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9891,7 +9894,7 @@ dependencies = [
 [[package]]
 name = "lang_toml"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9900,7 +9903,7 @@ dependencies = [
 [[package]]
 name = "lang_xml"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -9909,7 +9912,7 @@ dependencies = [
 [[package]]
 name = "lang_yaml"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_lang",
  "city_model",
@@ -10325,7 +10328,7 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 [[package]]
 name = "lens_edit_tool"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_registry",
@@ -10335,7 +10338,7 @@ dependencies = [
 [[package]]
 name = "lens_live_edits"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_registry",
@@ -10345,7 +10348,7 @@ dependencies = [
 [[package]]
 name = "lens_presence"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_registry",
@@ -10355,7 +10358,7 @@ dependencies = [
 [[package]]
 name = "lens_under_work"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_host",
  "city_registry",
@@ -11749,7 +11752,7 @@ dependencies = [
 [[package]]
 name = "nav_step"
 version = "0.1.0"
-source = "git+https://github.com/HubDev-AI/eof?rev=c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e#c06ee6245ca1fd47a2cbbeffcda362c0fc7b008e"
+source = "git+https://github.com/HubDev-AI/eof?rev=d76d5d6a43c1dd1f54b3a5326354708892ff0e59#d76d5d6a43c1dd1f54b3a5326354708892ff0e59"
 dependencies = [
  "city_nav_model",
  "city_registry",
